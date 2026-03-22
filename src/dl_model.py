@@ -1,3 +1,14 @@
+
+
+
+
+
+
+
+
+
+
+
 """
 Deep Learning model: Fine-tuned ResNet18 for PathMNIST classification.
 
@@ -94,8 +105,10 @@ def evaluate(model, loader, criterion):
     return avg_loss, f1, np.array(all_preds), np.array(all_labels)
 
 
-def plot_training_curves(history):
+def plot_training_curves(history, output_dir=None):
     """Plot and save training/validation loss and F1 curves."""
+    out = output_dir or RESULTS_DIR
+    os.makedirs(out, exist_ok=True)
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
 
     epochs = range(1, len(history["train_loss"]) + 1)
@@ -117,18 +130,20 @@ def plot_training_curves(history):
     ax2.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.savefig(os.path.join(RESULTS_DIR, "dl_training_curves.png"), dpi=150)
+    plt.savefig(os.path.join(out, "dl_training_curves.png"), dpi=150)
     plt.close()
-    print(f"Saved training curves to {RESULTS_DIR}/dl_training_curves.png")
+    print(f"  Saved training curves to {out}/dl_training_curves.png")
 
 
-def train(num_epochs=30, patience=5, lr=1e-4, batch_size=64):
+def train(num_epochs=30, patience=5, lr=1e-4, batch_size=64, output_dir=None):
     """Full training loop with early stopping."""
-    print(f"Using device: {DEVICE}")
+    out = output_dir or RESULTS_DIR
+    os.makedirs(out, exist_ok=True)
+    print(f"  Using device: {DEVICE}")
 
     train_loader, val_loader, test_loader, info = load_pathmnist(
         mode="dl", batch_size=batch_size)
-    print(f"Train: {len(train_loader.dataset)}, Val: {len(val_loader.dataset)}, "
+    print(f"  Train: {len(train_loader.dataset)}, Val: {len(val_loader.dataset)}, "
           f"Test: {len(test_loader.dataset)}")
 
     # Class-weighted loss
@@ -156,7 +171,7 @@ def train(num_epochs=30, patience=5, lr=1e-4, batch_size=64):
         history["train_f1"].append(train_f1)
         history["val_f1"].append(val_f1)
 
-        print(f"Epoch {epoch:2d}/{num_epochs} | "
+        print(f"  Epoch {epoch:2d}/{num_epochs} | "
               f"Train Loss: {train_loss:.4f} F1: {train_f1:.4f} | "
               f"Val Loss: {val_loss:.4f} F1: {val_f1:.4f}")
 
@@ -168,19 +183,19 @@ def train(num_epochs=30, patience=5, lr=1e-4, batch_size=64):
             epochs_no_improve += 1
 
         if epochs_no_improve >= patience:
-            print(f"Early stopping at epoch {epoch} (patience={patience})")
+            print(f"  Early stopping at epoch {epoch} (patience={patience})")
             break
 
     # Restore best model
     model.load_state_dict(best_model_state)
     torch.save(best_model_state, os.path.join(MODELS_DIR, "resnet18_pathmnist.pth"))
-    print(f"Saved best model to {MODELS_DIR}/resnet18_pathmnist.pth")
+    print(f"  Saved best model to {MODELS_DIR}/resnet18_pathmnist.pth")
 
     # Test evaluation
     test_loss, test_f1, test_preds, test_labels = evaluate(
         model, test_loader, criterion)
     test_acc = (test_preds == test_labels).mean()
-    print(f"\nTest Results: Acc={test_acc:.4f}, F1={test_f1:.4f}, Loss={test_loss:.4f}")
+    print(f"\n  Test Results: Acc={test_acc:.4f}, F1={test_f1:.4f}, Loss={test_loss:.4f}")
 
     # Save results
     results = {
@@ -191,10 +206,10 @@ def train(num_epochs=30, patience=5, lr=1e-4, batch_size=64):
         "best_epoch": len(history["train_loss"]) - epochs_no_improve,
         "total_epochs": len(history["train_loss"]),
     }
-    with open(os.path.join(RESULTS_DIR, "dl_results.json"), "w") as f:
+    with open(os.path.join(out, "dl_results.json"), "w") as f:
         json.dump(results, f, indent=2)
 
-    plot_training_curves(history)
+    plot_training_curves(history, output_dir=out)
     return model, history
 
 
