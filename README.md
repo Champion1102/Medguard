@@ -35,28 +35,33 @@ PathMNIST (28x28, 9 classes)
 # Install dependencies
 pip install -r requirements.txt
 
-# Run data exploration
+# Full Phase 1 demo (presentation mode, no retraining)
+python run.py --phase 1 --demo
+
+# Full Phase 1 with training
+python run.py --phase 1
+
+# Full Phase 2 with training
+python run.py --phase 2
+
+# Force rerun everything
+python run.py --phase 1 --force
+```
+
+### Individual scripts (also runnable standalone)
+
+```bash
 python src/data_exploration.py
-
-# Train baseline SVM
 python src/baseline_ml.py
-
-# Train ResNet18
 python src/dl_model.py
-
-# Run hybrid GMM + OOD detection
 python src/hybrid_gmm.py
-
-# Unified evaluation
 python src/evaluate.py
-
-# Generate ablation study
 python src/ablation_study.py
 ```
 
 ## Results
 
-All figures and JSON reports are saved to `results/`. Model weights are saved to `models/`.
+Phase-specific results are saved to `results/phase1/`, `results/phase2/`, etc. Model weights are saved to `models/`.
 
 ## Dataset
 
