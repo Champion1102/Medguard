@@ -18,8 +18,10 @@ RESULTS_DIR = "results"
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 
-def plot_class_distribution():
+def plot_class_distribution(output_dir=None):
     """Plot and save class distribution bar chart."""
+    out = output_dir or RESULTS_DIR
+    os.makedirs(out, exist_ok=True)
     _, labels = get_raw_data("train")
     class_counts = np.bincount(labels, minlength=9)
 
@@ -35,14 +37,16 @@ def plot_class_distribution():
                 str(count), ha="center", va="bottom", fontsize=8)
 
     plt.tight_layout()
-    plt.savefig(os.path.join(RESULTS_DIR, "class_distribution.png"), dpi=150)
+    plt.savefig(os.path.join(out, "class_distribution.png"), dpi=150)
     plt.close()
-    print(f"Saved class distribution plot to {RESULTS_DIR}/class_distribution.png")
+    print(f"  Saved class distribution plot to {out}/class_distribution.png")
     return class_counts
 
 
-def plot_sample_images():
+def plot_sample_images(output_dir=None):
     """Show 3 sample images per class in a grid."""
+    out = output_dir or RESULTS_DIR
+    os.makedirs(out, exist_ok=True)
     images, labels = get_raw_data("train")
 
     fig, axes = plt.subplots(9, 3, figsize=(6, 18))
@@ -56,10 +60,10 @@ def plot_sample_images():
 
     plt.suptitle("Sample Images per Class (3 each)", fontsize=12, y=1.01)
     plt.tight_layout()
-    plt.savefig(os.path.join(RESULTS_DIR, "sample_images.png"), dpi=150,
+    plt.savefig(os.path.join(out, "sample_images.png"), dpi=150,
                 bbox_inches="tight")
     plt.close()
-    print(f"Saved sample images to {RESULTS_DIR}/sample_images.png")
+    print(f"  Saved sample images to {out}/sample_images.png")
 
 
 def print_imbalance_stats():
