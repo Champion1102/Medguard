@@ -1,0 +1,120 @@
+\documentclass[10pt,conference]{IEEEtran}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+
+\title{MedGuard: Uncertainty-Aware Hybrid Classification\\for Robust Medical Vision}
+
+\author{
+\IEEEauthorblockN{Anonymous Authors}
+\IEEEauthorblockA{Department of Computer Science}
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Medical image classification demands not only high accuracy but also reliable uncertainty estimation to identify out-of-distribution (OOD) samples that may lead to dangerous misdiagnoses. We present MedGuard, a hybrid framework that combines deep learning feature extraction with Gaussian Mixture Models for uncertainty-aware classification. Our approach fine-tunes a ResNet18 backbone on PathMNIST (9-class colon pathology), extracts 512-dimensional embeddings, and fits a GMM to model the training distribution. At inference time, samples with log-likelihood below the 5th percentile threshold are flagged as OOD. We compare three approaches---HOG+SVM baseline, fine-tuned ResNet18, and our hybrid GMM---demonstrating that the hybrid approach maintains competitive classification accuracy while providing principled uncertainty estimates.
+\end{abstract}
+
+\section{Introduction}
+Automated pathology image classification has the potential to reduce diagnostic workload and improve consistency. However, clinical deployment requires models that know when they don't know---i.e., models that can detect inputs outside their training distribution and abstain from making potentially harmful predictions.
+
+We address this through a three-pronged approach:
+\begin{enumerate}
+    \item A \textbf{baseline ML} model using handcrafted features (HOG) with an SVM classifier, establishing a non-deep-learning reference point.
+    \item A \textbf{deep learning} model (fine-tuned ResNet18) optimized with class-weighted loss and early stopping.
+    \item A \textbf{hybrid GMM} model that fits a Gaussian Mixture Model on the deep learning embeddings, enabling principled out-of-distribution detection.
+\end{enumerate}
+
+\section{Related Work}
+Out-of-distribution detection in medical imaging has been explored through Monte Carlo Dropout \cite{gal2016dropout}, deep ensembles \cite{lakshminarayanan2017simple}, and density-based methods. Our GMM-based approach follows the density estimation paradigm, similar to Mahalanobis distance methods \cite{lee2018simple}, but uses a full mixture model to capture multi-modal embedding distributions.
+
+\section{Methods}
+
+\subsection{Dataset}
+PathMNIST from the MedMNIST benchmark contains 107,180 colon pathology images at $28 \times 28$ resolution across 9 tissue types.
+
+\subsection{Baseline: HOG + SVM}
+We extract Histogram of Oriented Gradients (HOG) features from images resized to $64 \times 64$. The SVM with RBF kernel computes the decision function:
+\begin{equation}
+    f(\mathbf{x}) = \sum_{i=1}^{N_s} \alpha_i y_i K(\mathbf{x}_i, \mathbf{x}) + b
+\end{equation}
+where the RBF kernel is:
+\begin{equation}
+    K(\mathbf{x}, \mathbf{x}') = \exp\left(-\gamma \|\mathbf{x} - \mathbf{x}'\|^2\right)
+\end{equation}
+
+\subsection{Deep Learning: ResNet18}
+We fine-tune a pretrained ResNet18 with a modified classifier head:
+\begin{equation}
+    \hat{y} = \text{softmax}(\mathbf{W} \cdot \text{Dropout}(\mathbf{z}) + \mathbf{b})
+\end{equation}
+where $\mathbf{z} \in \mathbb{R}^{512}$ is the penultimate layer output. Training uses class-weighted cross-entropy:
+\begin{equation}
+    \mathcal{L} = -\sum_{c=1}^{C} w_c \cdot y_c \log(\hat{y}_c), \quad w_c = \frac{N}{C \cdot N_c}
+\end{equation}
+
+\subsection{Hybrid GMM for OOD Detection}
+We model the embedding distribution using a Gaussian Mixture Model:
+\begin{equation}
+    p(\mathbf{z}) = \sum_{k=1}^{K} \pi_k \cdot \mathcal{N}(\mathbf{z} \mid \boldsymbol{\mu}_k, \boldsymbol{\Sigma}_k)
+\end{equation}
+The OOD score for a test sample is its log-likelihood under the GMM:
+\begin{equation}
+    s(\mathbf{z}) = \log p(\mathbf{z})
+\end{equation}
+The OOD threshold $\tau$ is set to the 5th percentile of training scores:
+\begin{equation}
+    \tau = Q_{0.05}\left(\{s(\mathbf{z}_i)\}_{i=1}^{N_{\text{train}}}\right)
+\end{equation}
+A sample is flagged as OOD if $s(\mathbf{z}) < \tau$.
+
+\section{Results}
+
+% INSERT ABLATION TABLE
+\input{../results/comparison_table.tex}
+
+% INSERT FIGURES
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=\columnwidth]{../results/architecture_diagram.png}
+    \caption{MedGuard architecture overview showing data flow from input through HOG/CNN pathways to GMM-based OOD detection.}
+    \label{fig:architecture}
+\end{figure}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=\columnwidth]{../results/tsne_ood.png}
+    \caption{t-SNE visualization of test embeddings. In-distribution samples colored by class; OOD samples marked in red.}
+    \label{fig:tsne}
+\end{figure}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=\columnwidth]{../results/dl_training_curves.png}
+    \caption{ResNet18 training and validation curves (loss and macro F1).}
+    \label{fig:training}
+\end{figure}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=\columnwidth]{../results/ablation_comparison.png}
+    \caption{Ablation comparison of accuracy and macro F1 across models.}
+    \label{fig:ablation}
+\end{figure}
+
+\section{Conclusion}
+MedGuard demonstrates that combining deep learning embeddings with Gaussian Mixture Models provides a practical framework for uncertainty-aware medical image classification. The hybrid approach maintains competitive accuracy while enabling principled out-of-distribution detection---a critical capability for clinical deployment.
+
+\begin{thebibliography}{9}
+\bibitem{gal2016dropout} Y. Gal and Z. Ghahramani, ``Dropout as a Bayesian Approximation: Representing Model Uncertainty in Deep Learning,'' ICML, 2016.
+\bibitem{lakshminarayanan2017simple} B. Lakshminarayanan et al., ``Simple and Scalable Predictive Uncertainty Estimation using Deep Ensembles,'' NeurIPS, 2017.
+\bibitem{lee2018simple} K. Lee et al., ``A Simple Unified Framework for Detecting Out-of-Distribution Samples and Adversarial Attacks,'' NeurIPS, 2018.
+\end{thebibliography}
+
+\end{document}
