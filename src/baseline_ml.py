@@ -76,8 +76,10 @@ def train_svm(X_train, y_train):
     return svm, scaler
 
 
-def evaluate_and_save(svm, scaler, X_test, y_test):
+def evaluate_and_save(svm, scaler, X_test, y_test, output_dir=None):
     """Evaluate SVM and save results."""
+    out = output_dir or RESULTS_DIR
+    os.makedirs(out, exist_ok=True)
     X_test_scaled = scaler.transform(X_test)
     y_pred = svm.predict(X_test_scaled)
 
@@ -86,9 +88,9 @@ def evaluate_and_save(svm, scaler, X_test, y_test):
     report = classification_report(y_test, y_pred, target_names=CLASS_NAMES,
                                    output_dict=True)
 
-    print(f"\nBaseline SVM Results:")
-    print(f"  Accuracy: {acc:.4f}")
-    print(f"  Macro F1: {f1_macro:.4f}")
+    print(f"\n  Baseline SVM Results:")
+    print(f"    Accuracy: {acc:.4f}")
+    print(f"    Macro F1: {f1_macro:.4f}")
     print(classification_report(y_test, y_pred, target_names=CLASS_NAMES))
 
     # Confusion matrix
@@ -102,7 +104,7 @@ def evaluate_and_save(svm, scaler, X_test, y_test):
     plt.xticks(rotation=45, ha="right")
     plt.yticks(rotation=0)
     plt.tight_layout()
-    plt.savefig(os.path.join(RESULTS_DIR, "baseline_confusion_matrix.png"), dpi=150)
+    plt.savefig(os.path.join(out, "baseline_confusion_matrix.png"), dpi=150)
     plt.close()
 
     # Save results JSON
@@ -116,11 +118,11 @@ def evaluate_and_save(svm, scaler, X_test, y_test):
             "f1-score": report[name]["f1-score"],
         } for name in CLASS_NAMES}
     }
-    with open(os.path.join(RESULTS_DIR, "baseline_results.json"), "w") as f:
+    with open(os.path.join(out, "baseline_results.json"), "w") as f:
         json.dump(results, f, indent=2)
 
-    print(f"Saved confusion matrix to {RESULTS_DIR}/baseline_confusion_matrix.png")
-    print(f"Saved results to {RESULTS_DIR}/baseline_results.json")
+    print(f"  Saved confusion matrix to {out}/baseline_confusion_matrix.png")
+    print(f"  Saved results to {out}/baseline_results.json")
     return results
 
 
