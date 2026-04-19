@@ -19,25 +19,31 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 
 
 def load_all_results():
-    """Load results from all models."""
+    """Load results from all models, checking phase subdirs and root."""
     results = {}
     files = {
-        "HOG + SVM": "baseline_results.json",
-        "ResNet18": "dl_results.json",
-        "Hybrid GMM": "hybrid_results.json",
+        "HOG + SVM": ["phase1/baseline/baseline_results.json", "baseline_results.json"],
+        "ResNet18": ["phase1/dl/dl_results.json", "dl_results.json"],
+        "Hybrid GMM": ["phase2/hybrid_results.json", "hybrid_results.json"],
     }
-    for name, fname in files.items():
-        path = os.path.join(RESULTS_DIR, fname)
-        if os.path.exists(path):
-            with open(path) as f:
-                results[name] = json.load(f)
-        else:
-            print(f"Warning: {fname} not found. Run the corresponding model first.")
+    for name, candidates in files.items():
+        found = False
+        for fname in candidates:
+            path = os.path.join(RESULTS_DIR, fname)
+            if os.path.exists(path):
+                with open(path) as f:
+                    results[name] = json.load(f)
+                found = True
+                break
+        if not found:
+            print(f"Warning: {name} results not found. Run the corresponding model first.")
     return results
 
 
-def generate_latex_table(results):
+def generate_latex_table(results, output_dir=None):
     """Generate LaTeX-formatted comparison table."""
+    output_dir = output_dir or RESULTS_DIR
+    os.makedirs(output_dir, exist_ok=True)
     latex = []
     latex.append(r"\begin{table}[h]")
     latex.append(r"\centering")
@@ -64,14 +70,17 @@ def generate_latex_table(results):
     print("\n--- LaTeX Table ---")
     print(table_str)
 
-    with open(os.path.join(RESULTS_DIR, "comparison_table.tex"), "w") as f:
+    out_path = os.path.join(output_dir, "comparison_table.tex")
+    with open(out_path, "w") as f:
         f.write(table_str)
-    print(f"\nSaved to {RESULTS_DIR}/comparison_table.tex")
+    print(f"\nSaved to {out_path}")
     return table_str
 
 
-def plot_comparison_bar_chart(results):
+def plot_comparison_bar_chart(results, output_dir=None):
     """Generate bar chart comparing model metrics."""
+    output_dir = output_dir or RESULTS_DIR
+    os.makedirs(output_dir, exist_ok=True)
     models = list(results.keys())
     accuracies = [results[m]["accuracy"] for m in models]
     f1_scores = [results[m]["macro_f1"] for m in models]
@@ -101,9 +110,10 @@ def plot_comparison_bar_chart(results):
                 f"{bar.get_height():.3f}", ha="center", va="bottom", fontsize=9)
 
     plt.tight_layout()
-    plt.savefig(os.path.join(RESULTS_DIR, "ablation_comparison.png"), dpi=150)
+    out_path = os.path.join(output_dir, "ablation_comparison.png")
+    plt.savefig(out_path, dpi=150)
     plt.close()
-    print(f"Saved comparison chart to {RESULTS_DIR}/ablation_comparison.png")
+    print(f"Saved comparison chart to {out_path}")
 
 
 def print_summary_table(results):
@@ -121,15 +131,21 @@ def print_summary_table(results):
     print("=" * 65)
 
 
-if __name__ == "__main__":
+def run_ablation(output_dir=None):
+    """Run full ablation study."""
     print("Running Ablation Study...")
     results = load_all_results()
 
     if not results:
         print("No results found. Run the models first.")
-        sys.exit(1)
+        return None
 
     print_summary_table(results)
-    generate_latex_table(results)
-    plot_comparison_bar_chart(results)
+    generate_latex_table(results, output_dir=output_dir)
+    plot_comparison_bar_chart(results, output_dir=output_dir)
+    return results
+
+
+if __name__ == "__main__":
+    run_ablation()
     print("\nDone!")

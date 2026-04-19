@@ -22,9 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.data_loader import load_pathmnist, get_raw_data, CLASS_NAMES
 from src.baseline_ml import extract_hog_features
 
-RESULTS_DIR = "results"
-MODELS_DIR = "models"
-os.makedirs(RESULTS_DIR, exist_ok=True)
+from config import RESULTS_DIR, MODELS_DIR
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available()
                        else "mps" if torch.backends.mps.is_available()
@@ -104,8 +102,17 @@ def evaluate_dl():
 
 def evaluate_hybrid():
     """Load hybrid GMM results from saved JSON."""
-    results_path = os.path.join(RESULTS_DIR, "hybrid_results.json")
-    if not os.path.exists(results_path):
+    candidates = [
+        os.path.join(RESULTS_DIR, "phase2", "hybrid_results.json"),
+        os.path.join(RESULTS_DIR, "hybrid_results.json"),
+    ]
+    results_path = None
+    for path in candidates:
+        if os.path.exists(path):
+            results_path = path
+            break
+
+    if results_path is None:
         print("Hybrid GMM results not found. Run hybrid_gmm.py first.")
         return None
 
@@ -131,21 +138,25 @@ def print_comparison_table(results):
     print("=" * 75)
 
 
-def save_results(results):
+def save_results(results, output_dir=None):
     """Save comparison as JSON and CSV."""
-    with open(os.path.join(RESULTS_DIR, "comparison_results.json"), "w") as f:
+    output_dir = output_dir or RESULTS_DIR
+    os.makedirs(output_dir, exist_ok=True)
+
+    with open(os.path.join(output_dir, "comparison_results.json"), "w") as f:
         json.dump(results, f, indent=2, default=str)
 
-    with open(os.path.join(RESULTS_DIR, "comparison_results.csv"), "w", newline="") as f:
+    with open(os.path.join(output_dir, "comparison_results.csv"), "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["model", "accuracy", "macro_f1",
                                                 "auroc", "ood_rate"])
         writer.writeheader()
         writer.writerows(results)
 
-    print(f"\nSaved to {RESULTS_DIR}/comparison_results.json and .csv")
+    print(f"\nSaved to {output_dir}/comparison_results.json and .csv")
 
 
-if __name__ == "__main__":
+def run_evaluation(output_dir=None):
+    """Run unified evaluation across all models."""
     print("Running unified evaluation across all models...")
     results = []
 
@@ -159,6 +170,11 @@ if __name__ == "__main__":
 
     if results:
         print_comparison_table(results)
-        save_results(results)
+        save_results(results, output_dir=output_dir)
 
+    return results
+
+
+if __name__ == "__main__":
+    run_evaluation()
     print("\nDone!")

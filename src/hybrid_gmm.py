@@ -31,10 +31,7 @@ import joblib
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.data_loader import load_pathmnist, CLASS_NAMES
 
-RESULTS_DIR = "results"
-MODELS_DIR = "models"
-os.makedirs(RESULTS_DIR, exist_ok=True)
-os.makedirs(MODELS_DIR, exist_ok=True)
+from config import RESULTS_DIR, MODELS_DIR
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available()
                        else "mps" if torch.backends.mps.is_available()
@@ -114,10 +111,12 @@ def detect_ood(gmm, train_embeddings, test_embeddings, percentile=5):
     return test_scores, is_ood, threshold
 
 
-def plot_tsne_ood(embeddings, labels, is_ood, title="t-SNE: In-Distribution vs OOD"):
+def plot_tsne_ood(embeddings, labels, is_ood, output_dir=None,
+                  title="t-SNE: In-Distribution vs OOD"):
     """Generate t-SNE plot with OOD points highlighted."""
+    output_dir = output_dir or RESULTS_DIR
+    os.makedirs(output_dir, exist_ok=True)
     print("Computing t-SNE (this may take a minute)...")
-    # Subsample for speed if needed
     n = len(embeddings)
     if n > 5000:
         idx = np.random.RandomState(42).choice(n, 5000, replace=False)
@@ -130,12 +129,10 @@ def plot_tsne_ood(embeddings, labels, is_ood, title="t-SNE: In-Distribution vs O
 
     fig, ax = plt.subplots(figsize=(12, 10))
 
-    # Plot in-distribution points colored by class
     in_dist_mask = ~is_ood
     scatter = ax.scatter(coords[in_dist_mask, 0], coords[in_dist_mask, 1],
                          c=labels[in_dist_mask], cmap="tab10", s=8, alpha=0.6)
 
-    # Plot OOD points in red
     if is_ood.any():
         ax.scatter(coords[is_ood, 0], coords[is_ood, 1],
                    c="red", marker="x", s=30, alpha=0.8, label="OOD")
@@ -147,18 +144,21 @@ def plot_tsne_ood(embeddings, labels, is_ood, title="t-SNE: In-Distribution vs O
     ax.set_xlabel("t-SNE 1")
     ax.set_ylabel("t-SNE 2")
     plt.tight_layout()
-    plt.savefig(os.path.join(RESULTS_DIR, "tsne_ood.png"), dpi=150)
+    out_path = os.path.join(output_dir, "tsne_ood.png")
+    plt.savefig(out_path, dpi=150)
     plt.close()
-    print(f"Saved t-SNE OOD plot to {RESULTS_DIR}/tsne_ood.png")
+    print(f"Saved t-SNE OOD plot to {out_path}")
 
 
-def run_hybrid_gmm():
+def run_hybrid_gmm(output_dir=None, tsne_dir=None):
     """Full hybrid GMM pipeline."""
-    # Load data
+    output_dir = output_dir or RESULTS_DIR
+    tsne_dir = tsne_dir or output_dir
+    os.makedirs(output_dir, exist_ok=True)
+
     train_loader, val_loader, test_loader, _ = load_pathmnist(
         mode="dl", batch_size=128)
 
-    # Extract embeddings
     embedding_model, full_model = load_resnet_backbone()
     print("Extracting training embeddings...")
     train_emb, train_labels = extract_embeddings(embedding_model, train_loader)
@@ -168,22 +168,17 @@ def run_hybrid_gmm():
     test_emb, test_labels = extract_embeddings(embedding_model, test_loader)
     print(f"Test embeddings shape: {test_emb.shape}")
 
-    # Fit GMM
     gmm = fit_gmm(train_emb, n_components=9)
     joblib.dump(gmm, os.path.join(MODELS_DIR, "hybrid_gmm.pkl"))
 
-    # GMM classification (assign to closest component)
     gmm_preds = gmm.predict(test_emb)
 
-    # OOD detection
     test_scores, is_ood, threshold = detect_ood(gmm, train_emb, test_emb)
 
-    # For in-distribution samples, use the full model's predictions
     full_model = full_model.to(DEVICE)
     full_model.eval()
     _, _, dl_preds, _ = _get_dl_predictions(full_model, test_loader)
 
-    # Hybrid: use DL predictions for in-dist, flag OOD
     hybrid_preds = dl_preds.copy()
     in_dist_acc = accuracy_score(test_labels[~is_ood], hybrid_preds[~is_ood])
     in_dist_f1 = f1_score(test_labels[~is_ood], hybrid_preds[~is_ood], average="macro")
@@ -195,7 +190,6 @@ def run_hybrid_gmm():
     print(f"  In-dist - Acc: {in_dist_acc:.4f}, F1: {in_dist_f1:.4f}")
     print(f"  OOD detection rate: {is_ood.mean():.4f}")
 
-    # Save results
     results = {
         "model": "Hybrid GMM (ResNet18 embeddings)",
         "accuracy": float(overall_acc),
@@ -207,11 +201,10 @@ def run_hybrid_gmm():
         "n_ood_samples": int(is_ood.sum()),
         "n_total_samples": int(len(is_ood)),
     }
-    with open(os.path.join(RESULTS_DIR, "hybrid_results.json"), "w") as f:
+    with open(os.path.join(output_dir, "hybrid_results.json"), "w") as f:
         json.dump(results, f, indent=2)
 
-    # t-SNE visualization
-    plot_tsne_ood(test_emb, test_labels, is_ood)
+    plot_tsne_ood(test_emb, test_labels, is_ood, output_dir=tsne_dir)
 
     return results
 
