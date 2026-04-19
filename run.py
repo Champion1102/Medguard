@@ -183,21 +183,73 @@ def print_phase1_summary():
 
 def run_phase2(demo=False, force=False):
     """Phase 2: Hybrid GMM + OOD Detection + Ablation."""
-    # Run Phase 1 first
     if not run_phase1(demo=demo, force=force):
         return False
 
     print("\n" + "=" * 60)
     print("  PHASE 2: HYBRID GMM & OOD DETECTION")
-    print("  (Coming in April)")
     print("=" * 60)
-    print("\n  Phase 2 will include:")
-    print("    - GMM on ResNet embeddings")
-    print("    - OOD detection with 5th percentile threshold")
-    print("    - t-SNE visualization")
-    print("    - Ablation comparison table")
-    print()
+
+    ensure_dirs(PHASE2_RESULTS, PHASE2_TSNE, PHASE2_ABLATION)
+
+    # --- Step 1: Hybrid GMM ---
+    if not force and os.path.exists(os.path.join(PHASE2_RESULTS, "hybrid_results.json")) and os.path.exists(os.path.join(PHASE2_TSNE, "tsne_ood.png")):
+        print("\n[1/3] [CACHED] Hybrid GMM results found, skipping...")
+    else:
+        print("\n[1/3] Running Hybrid GMM pipeline...")
+        from src.hybrid_gmm import run_hybrid_gmm
+        run_hybrid_gmm(output_dir=PHASE2_RESULTS, tsne_dir=PHASE2_TSNE)
+
+    # --- Step 2: Unified evaluation ---
+    if not force and os.path.exists(os.path.join(PHASE2_RESULTS, "comparison_results.json")):
+        print("\n[2/3] [CACHED] Evaluation results found, skipping...")
+    else:
+        print("\n[2/3] Running unified evaluation...")
+        from src.evaluate import run_evaluation
+        run_evaluation(output_dir=PHASE2_RESULTS)
+
+    # --- Step 3: Ablation study ---
+    if not force and phase_has_results(PHASE2_ABLATION):
+        print("\n[3/3] [CACHED] Ablation results found, skipping...")
+    else:
+        print("\n[3/3] Running ablation study...")
+        from src.ablation_study import run_ablation
+        run_ablation(output_dir=PHASE2_ABLATION)
+
+    # --- Summary ---
+    print_phase2_summary()
     return True
+
+
+def print_phase2_summary():
+    """Print Phase 2 results summary."""
+    import json
+
+    print("\n" + "=" * 60)
+    print("  PHASE 2 RESULTS SUMMARY")
+    print("=" * 60)
+
+    hybrid_path = os.path.join(PHASE2_RESULTS, "hybrid_results.json")
+    if os.path.exists(hybrid_path):
+        with open(hybrid_path) as f:
+            data = json.load(f)
+        print(f"\n  Hybrid GMM:")
+        print(f"    Overall Acc: {data['accuracy']:.4f}, F1: {data['macro_f1']:.4f}")
+        print(f"    In-dist Acc: {data['in_dist_accuracy']:.4f}, F1: {data['in_dist_f1']:.4f}")
+        print(f"    OOD samples: {data['n_ood_samples']} / {data['n_total_samples']} "
+              f"({data['ood_detection_rate']:.1%})")
+    else:
+        print("\n  Hybrid GMM results not found.")
+
+    print("\n  Generated files:")
+    for phase_dir in [PHASE2_RESULTS, PHASE2_TSNE, PHASE2_ABLATION]:
+        if os.path.exists(phase_dir):
+            for f in sorted(os.listdir(phase_dir)):
+                if not f.startswith("."):
+                    full = os.path.join(phase_dir, f)
+                    if os.path.isfile(full):
+                        print(f"    {full}")
+    print()
 
 
 def main():
