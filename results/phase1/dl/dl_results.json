@@ -1,6 +1,8 @@
 {
   "model": "ResNet18 (fine-tuned)",
-  "accuracy": 0.9194986072423398,
-  "macro_f1": 0.894947582059232,
-  "test_loss": 0.3408504886049414
+  "accuracy": 0.936908077994429,
+  "macro_f1": 0.9185528367919922,
+  "test_loss": 0.2699208284118589,
+  "best_epoch": 25,
+  "total_epochs": 30
 }
