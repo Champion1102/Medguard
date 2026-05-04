@@ -55,15 +55,15 @@ def plot_architecture_diagram():
     draw_arrow(9.7, 6.5, 11, 6.5)
     draw_box(11, 6, 2.5, 1, "Baseline\nPredictions", "#C8E6C9")
 
-    # Branch 2: ResNet18
+    # Branch 2: DenseNet121
     draw_arrow(3, 4, 4, 4)
-    draw_box(4, 3.5, 2.2, 1, "ResNet18\n(Fine-tuned)", "#E1BEE7")
+    draw_box(4, 3.5, 2.2, 1, "DenseNet121\n(Fine-tuned)", "#E1BEE7")
     draw_arrow(6.2, 4, 7.5, 4)
     draw_box(7.5, 3.5, 2.2, 1, "DL\nPredictions", "#C8E6C9")
 
     # Branch 3: Embeddings -> GMM
     draw_arrow(6.2, 3.8, 7.5, 1.5)
-    draw_box(7.5, 1, 2.2, 1, "512-dim\nEmbeddings", "#B3E5FC")
+    draw_box(7.5, 1, 2.2, 1, "1024-dim\nEmbeddings", "#B3E5FC")
     draw_arrow(9.7, 1.5, 11, 1.5)
     draw_box(11, 1, 2.2, 1, "GMM\n(9 comp.)", "#FFE0B2")
     draw_arrow(13.2, 1.5, 14, 2.5)
@@ -86,7 +86,7 @@ def plot_all_confusion_matrices():
     # We load from JSON files and generate summary plots.
     fig, axes = plt.subplots(1, 3, figsize=(24, 7))
 
-    model_names = ["Baseline SVM", "ResNet18", "Hybrid GMM"]
+    model_names = ["Baseline SVM", "DenseNet121", "Hybrid GMM"]
     result_files = ["baseline_results.json", "dl_results.json", "hybrid_results.json"]
 
     for i, (name, rfile) in enumerate(zip(model_names, result_files)):

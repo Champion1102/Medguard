@@ -1,0 +1,11 @@
+{
+  "model": "Hybrid GMM (ResNet18 embeddings)",
+  "accuracy": 0.936908077994429,
+  "macro_f1": 0.9185528367919922,
+  "in_dist_accuracy": 0.9733705772811918,
+  "in_dist_f1": 0.9581449065113353,
+  "ood_detection_rate": 0.2520891364902507,
+  "ood_threshold": 148.47821044921875,
+  "n_ood_samples": 1810,
+  "n_total_samples": 7180
+}

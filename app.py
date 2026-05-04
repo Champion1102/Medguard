@@ -1,5 +1,5 @@
 """
-MedGuard Streamlit Dashboard — Phase 1 Demo
+MedGuard Streamlit Dashboard — Phase 1 & Phase 2
 Run: streamlit run app.py
 """
 
@@ -16,7 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from src.data_loader import get_raw_data, CLASS_NAMES, compute_class_weights
 from config import (
     MODELS_DIR, PHASE1_EDA, PHASE1_BASELINE, PHASE1_DL,
-    SVM_MODEL_PATH, RESNET_MODEL_PATH,
+    PHASE2_RESULTS, PHASE2_TSNE, PHASE2_ABLATION,
+    SVM_MODEL_PATH, DENSENET_MODEL_PATH, GMM_MODEL_PATH,
 )
 
 st.set_page_config(
@@ -66,6 +67,25 @@ st.markdown("""
     .metric-blue {
         background: linear-gradient(135deg, #2193b0 0%, #6dd5ed 100%);
     }
+    .metric-purple {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    .ood-safe {
+        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        padding: 12px 20px;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+        font-weight: 600;
+    }
+    .ood-flagged {
+        background: linear-gradient(135deg, #e53935 0%, #ff7043 100%);
+        padding: 12px 20px;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+        font-weight: 600;
+    }
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
     }
@@ -88,22 +108,22 @@ def load_dataset():
 @st.cache_data
 def load_results():
     results = {}
-    for name, path in [("baseline", os.path.join(PHASE1_BASELINE, "baseline_results.json")),
-                       ("dl", os.path.join(PHASE1_DL, "dl_results.json"))]:
-        if os.path.exists(path):
-            with open(path) as f:
-                results[name] = json.load(f)
-    # Fallback to old results dir
-    if "baseline" not in results:
-        alt = os.path.join("results", "baseline_results.json")
-        if os.path.exists(alt):
-            with open(alt) as f:
-                results["baseline"] = json.load(f)
-    if "dl" not in results:
-        alt = os.path.join("results", "dl_results.json")
-        if os.path.exists(alt):
-            with open(alt) as f:
-                results["dl"] = json.load(f)
+    sources = [
+        ("baseline", os.path.join(PHASE1_BASELINE, "baseline_results.json"),
+         os.path.join("results", "baseline_results.json")),
+        ("dl", os.path.join(PHASE1_DL, "dl_results.json"),
+         os.path.join("results", "dl_results.json")),
+        ("hybrid", os.path.join(PHASE2_RESULTS, "hybrid_results.json"),
+         os.path.join("results", "hybrid_results.json")),
+        ("comparison", os.path.join(PHASE2_RESULTS, "comparison_results.json"),
+         os.path.join("results", "comparison_results.json")),
+    ]
+    for name, primary, fallback in sources:
+        for path in [primary, fallback]:
+            if os.path.exists(path):
+                with open(path) as f:
+                    results[name] = json.load(f)
+                break
     return results
 
 
@@ -117,28 +137,68 @@ def load_svm_model():
 
 
 @st.cache_resource
-def load_resnet_model():
+def load_densenet_model():
     import torch
     import torch.nn as nn
     from torchvision import models
 
-    if not os.path.exists(RESNET_MODEL_PATH):
+    if not os.path.exists(DENSENET_MODEL_PATH):
         return None, None
 
     device = torch.device("cuda" if torch.cuda.is_available()
                           else "mps" if torch.backends.mps.is_available()
                           else "cpu")
-    model = models.resnet18(weights=None)
-    model.fc = nn.Sequential(nn.Dropout(0.3), nn.Linear(512, 9))
-    model.load_state_dict(torch.load(RESNET_MODEL_PATH, map_location=device,
+    model = models.densenet121(weights=None)
+    model.classifier = nn.Sequential(nn.Dropout(0.3), nn.Linear(1024, 9))
+    model.load_state_dict(torch.load(DENSENET_MODEL_PATH, map_location=device,
                                      weights_only=True))
     model = model.to(device)
     model.eval()
     return model, device
 
 
+@st.cache_resource
+def load_gmm_model():
+    import joblib
+    if os.path.exists(GMM_MODEL_PATH):
+        return joblib.load(GMM_MODEL_PATH)
+    return None
+
+
+@st.cache_resource
+def load_densenet_embedding_model():
+    import torch
+    import torch.nn as nn
+    from torchvision import models
+
+    if not os.path.exists(DENSENET_MODEL_PATH):
+        return None, None
+
+    device = torch.device("cuda" if torch.cuda.is_available()
+                          else "mps" if torch.backends.mps.is_available()
+                          else "cpu")
+    model = models.densenet121(weights=None)
+    model.classifier = nn.Sequential(nn.Dropout(0.3), nn.Linear(1024, 9))
+    model.load_state_dict(torch.load(DENSENET_MODEL_PATH, map_location=device,
+                                     weights_only=True))
+
+    class _Embedder(nn.Module):
+        def __init__(self, features):
+            super().__init__()
+            self.features = features
+        def forward(self, x):
+            f = self.features(x)
+            f = nn.functional.relu(f, inplace=True)
+            f = nn.functional.adaptive_avg_pool2d(f, (1, 1))
+            return f
+
+    embedding_model = _Embedder(model.features)
+    embedding_model = embedding_model.to(device)
+    embedding_model.eval()
+    return embedding_model, device
+
+
 def predict_single_svm(image):
-    """Predict class for a single image using SVM."""
     from src.baseline_ml import extract_hog_features
     svm, scaler = load_svm_model()
     if svm is None:
@@ -146,20 +206,17 @@ def predict_single_svm(image):
     features = extract_hog_features(image[np.newaxis, ...])
     features_scaled = scaler.transform(features)
     pred = svm.predict(features_scaled)[0]
-    # Get decision function scores as proxy for confidence
     decision = svm.decision_function(features_scaled)[0]
-    # Convert to pseudo-probabilities via softmax
     exp_scores = np.exp(decision - decision.max())
     probs = exp_scores / exp_scores.sum()
     return int(pred), probs
 
 
-def predict_single_resnet(image):
-    """Predict class for a single image using ResNet18."""
+def predict_single_densenet(image):
     import torch
     from torchvision import transforms
 
-    model, device = load_resnet_model()
+    model, device = load_densenet_model()
     if model is None:
         return None, None
 
@@ -183,6 +240,38 @@ def predict_single_resnet(image):
     return pred, probs
 
 
+def get_ood_score(image):
+    import torch
+    from torchvision import transforms
+
+    gmm = load_gmm_model()
+    emb_model, device = load_densenet_embedding_model()
+    if gmm is None or emb_model is None:
+        return None, None
+
+    transform = transforms.Compose([
+        transforms.Resize((64, 64)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225]),
+    ])
+
+    pil_img = Image.fromarray(image)
+    if pil_img.mode != "RGB":
+        pil_img = pil_img.convert("RGB")
+    img_tensor = transform(pil_img).unsqueeze(0).to(device)
+
+    with torch.no_grad():
+        embedding = emb_model(img_tensor).squeeze(-1).squeeze(-1).cpu().numpy()
+
+    log_likelihood = gmm.score_samples(embedding)[0]
+    hybrid_results = load_results().get("hybrid", {})
+    threshold = hybrid_results.get("ood_threshold", -999)
+    is_ood = log_likelihood < threshold
+
+    return float(log_likelihood), bool(is_ood)
+
+
 # ── Sidebar ────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## 🔬 MedGuard")
@@ -192,13 +281,13 @@ with st.sidebar:
     page = st.radio(
         "Navigate",
         ["Overview", "Data Exploration", "Model Comparison",
-         "Live Classification", "Technical Details"],
+         "OOD Detection", "Live Classification", "Technical Details"],
         index=0,
     )
 
     st.divider()
-    st.markdown("**Phase 1** — March 2026")
-    st.markdown("EDA + SVM + ResNet18")
+    st.markdown("**Phase 1** — EDA + SVM + DenseNet121")
+    st.markdown("**Phase 2** — Hybrid GMM + OOD Detection")
     st.divider()
     st.caption("PathMNIST | 9 classes | 107K images")
 
@@ -216,23 +305,44 @@ if page == "Overview":
     st.markdown('<p class="sub-header">Uncertainty-Aware Hybrid Classification for Robust Medical Vision</p>',
                 unsafe_allow_html=True)
 
-    # Metric cards
+    baseline_acc = results.get("baseline", {}).get("accuracy", 0)
+    baseline_f1 = results.get("baseline", {}).get("macro_f1", 0)
+    dl_acc = results.get("dl", {}).get("accuracy", 0)
+    dl_f1 = results.get("dl", {}).get("macro_f1", 0)
+    hybrid_acc = results.get("hybrid", {}).get("accuracy", 0)
+    hybrid_f1 = results.get("hybrid", {}).get("macro_f1", 0)
+    hybrid_indist_acc = results.get("hybrid", {}).get("in_dist_accuracy", 0)
+    ood_rate = results.get("hybrid", {}).get("ood_detection_rate", 0)
+
+    st.markdown("#### Phase 1 — Baseline Models")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.markdown("""<div class="metric-card metric-orange">
-            <h2>48.2%</h2><p>SVM Accuracy</p></div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="metric-card metric-orange">
+            <h2>{baseline_acc:.1%}</h2><p>SVM Accuracy</p></div>""", unsafe_allow_html=True)
     with col2:
-        baseline_f1 = results.get("baseline", {}).get("macro_f1", 0.4246)
         st.markdown(f"""<div class="metric-card metric-orange">
             <h2>{baseline_f1:.1%}</h2><p>SVM Macro F1</p></div>""", unsafe_allow_html=True)
     with col3:
-        dl_acc = results.get("dl", {}).get("accuracy", 0.9195)
         st.markdown(f"""<div class="metric-card metric-green">
-            <h2>{dl_acc:.1%}</h2><p>ResNet18 Accuracy</p></div>""", unsafe_allow_html=True)
+            <h2>{dl_acc:.1%}</h2><p>DenseNet121 Accuracy</p></div>""", unsafe_allow_html=True)
     with col4:
-        dl_f1 = results.get("dl", {}).get("macro_f1", 0.8949)
         st.markdown(f"""<div class="metric-card metric-green">
-            <h2>{dl_f1:.1%}</h2><p>ResNet18 Macro F1</p></div>""", unsafe_allow_html=True)
+            <h2>{dl_f1:.1%}</h2><p>DenseNet121 Macro F1</p></div>""", unsafe_allow_html=True)
+
+    st.markdown("#### Phase 2 — Hybrid GMM + OOD Detection")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.markdown(f"""<div class="metric-card metric-blue">
+            <h2>{hybrid_acc:.1%}</h2><p>Hybrid Overall Acc</p></div>""", unsafe_allow_html=True)
+    with col2:
+        st.markdown(f"""<div class="metric-card metric-blue">
+            <h2>{hybrid_f1:.1%}</h2><p>Hybrid Macro F1</p></div>""", unsafe_allow_html=True)
+    with col3:
+        st.markdown(f"""<div class="metric-card metric-purple">
+            <h2>{hybrid_indist_acc:.1%}</h2><p>In-Dist Accuracy</p></div>""", unsafe_allow_html=True)
+    with col4:
+        st.markdown(f"""<div class="metric-card metric-purple">
+            <h2>{ood_rate:.1%}</h2><p>OOD Detection Rate</p></div>""", unsafe_allow_html=True)
 
     st.markdown("---")
 
@@ -246,8 +356,8 @@ if page == "Overview":
 
         MedGuard addresses this through a three-model pipeline:
         1. **HOG + SVM** — traditional ML baseline using handcrafted features
-        2. **ResNet18** — fine-tuned deep learning with class-weighted loss
-        3. **Hybrid GMM** — Gaussian Mixture Model on CNN embeddings for OOD detection *(Phase 2)*
+        2. **DenseNet121** — fine-tuned deep learning with class-weighted loss
+        3. **Hybrid GMM** — Gaussian Mixture Model on CNN embeddings for OOD detection
         """)
 
     with col_r:
@@ -334,24 +444,25 @@ elif page == "Data Exploration":
 # ═══════════════════════════════════════════════════════════
 elif page == "Model Comparison":
     st.markdown('<p class="main-header">Model Comparison</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">HOG + SVM vs Fine-tuned ResNet18</p>',
+    st.markdown('<p class="sub-header">HOG + SVM vs DenseNet121 vs Hybrid GMM</p>',
                 unsafe_allow_html=True)
 
-    tab1, tab2, tab3 = st.tabs(["Summary", "SVM Details", "ResNet18 Details"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Summary", "SVM Details", "DenseNet121 Details", "Hybrid GMM Details"])
 
     with tab1:
         col1, col2 = st.columns(2)
 
-        # Comparison bar chart
         with col1:
-            models_list = ["HOG + SVM", "ResNet18"]
+            models_list = ["HOG + SVM", "DenseNet121", "Hybrid GMM"]
             accs = [results.get("baseline", {}).get("accuracy", 0),
-                    results.get("dl", {}).get("accuracy", 0)]
+                    results.get("dl", {}).get("accuracy", 0),
+                    results.get("hybrid", {}).get("accuracy", 0)]
             f1s = [results.get("baseline", {}).get("macro_f1", 0),
-                   results.get("dl", {}).get("macro_f1", 0)]
+                   results.get("dl", {}).get("macro_f1", 0),
+                   results.get("hybrid", {}).get("macro_f1", 0)]
 
-            fig, ax = plt.subplots(figsize=(8, 5))
-            x = np.arange(2)
+            fig, ax = plt.subplots(figsize=(10, 5))
+            x = np.arange(3)
             w = 0.35
             b1 = ax.bar(x - w / 2, accs, w, label="Accuracy", color="#4CAF50", alpha=0.85)
             b2 = ax.bar(x + w / 2, f1s, w, label="Macro F1", color="#2196F3", alpha=0.85)
@@ -359,7 +470,7 @@ elif page == "Model Comparison":
             ax.set_xticklabels(models_list)
             ax.set_ylim(0, 1.1)
             ax.legend()
-            ax.set_title("Accuracy vs Macro F1")
+            ax.set_title("Accuracy vs Macro F1 — All Models")
             ax.grid(axis="y", alpha=0.3)
             for b in b1:
                 ax.text(b.get_x() + b.get_width() / 2, b.get_height() + 0.02,
@@ -376,18 +487,47 @@ elif page == "Model Comparison":
             if accs[0] > 0 and accs[1] > 0:
                 improvement = (accs[1] - accs[0]) / accs[0] * 100
                 st.markdown(f"""
-                - ResNet18 achieves **{accs[1]:.1%}** accuracy vs SVM's **{accs[0]:.1%}**
-                - That's a **{improvement:.0f}% relative improvement**
+                - DenseNet121 achieves **{accs[1]:.1%}** accuracy vs SVM's **{accs[0]:.1%}**
+                  (**{improvement:.0f}% relative improvement**)
                 - The gap confirms handcrafted features (HOG) cannot capture
                   fine-grained pathology textures
-                - Class-weighted loss helps ResNet handle the 1.63x imbalance
+                - Class-weighted loss helps ResNet handle the imbalance
                 """)
-            st.markdown("### Phase 2 Preview")
-            st.markdown("""
-            - GMM on ResNet embeddings for **OOD detection**
-            - Flag uncertain samples before they reach a clinician
-            - Hybrid model maintains ResNet accuracy while adding safety
-            """)
+            if accs[2] > 0:
+                hybrid_data = results.get("hybrid", {})
+                indist_acc = hybrid_data.get("in_dist_accuracy", 0)
+                ood_rate = hybrid_data.get("ood_detection_rate", 0)
+                st.markdown(f"""
+                **Hybrid GMM (Phase 2):**
+                - Overall accuracy: **{accs[2]:.1%}** with OOD safety layer
+                - In-distribution accuracy: **{indist_acc:.1%}**
+                - Flags **{ood_rate:.1%}** of test samples as OOD/uncertain
+                - Maintains classification power while adding uncertainty awareness
+                """)
+
+        ablation_path = os.path.join(PHASE2_ABLATION, "ablation_comparison.png")
+        if not os.path.exists(ablation_path):
+            ablation_path = os.path.join("results", "ablation_comparison.png")
+        if os.path.exists(ablation_path):
+            st.markdown("### Ablation Study")
+            st.image(ablation_path, use_container_width=True)
+
+        if "comparison" in results:
+            st.markdown("### Full Comparison Table")
+            comp = results["comparison"]
+            if isinstance(comp, list):
+                rows = []
+                for r in comp:
+                    auroc_val = r.get("auroc", "N/A")
+                    ood_val = r.get("ood_rate", "N/A")
+                    rows.append({
+                        "Model": r["model"],
+                        "Accuracy": f"{r['accuracy']:.4f}" if isinstance(r['accuracy'], float) else r['accuracy'],
+                        "Macro F1": f"{r['macro_f1']:.4f}" if isinstance(r['macro_f1'], float) else r['macro_f1'],
+                        "AUROC": f"{auroc_val:.4f}" if isinstance(auroc_val, float) else auroc_val,
+                        "OOD Rate": f"{ood_val:.4f}" if isinstance(ood_val, float) else ood_val,
+                    })
+                st.dataframe(rows, use_container_width=True, hide_index=True)
 
     with tab2:
         st.markdown("#### SVM Confusion Matrix")
@@ -411,7 +551,7 @@ elif page == "Model Comparison":
             st.dataframe(rows, use_container_width=True, hide_index=True)
 
     with tab3:
-        st.markdown("#### ResNet18 Training Curves")
+        st.markdown("#### DenseNet121 Training Curves")
         curves_path = os.path.join(PHASE1_DL, "dl_training_curves.png")
         if not os.path.exists(curves_path):
             curves_path = os.path.join("results", "dl_training_curves.png")
@@ -428,13 +568,167 @@ elif page == "Model Comparison":
             col2.metric("Test Macro F1", f"{dl['macro_f1']:.4f}")
             col3.metric("Test Loss", f"{dl.get('test_loss', 'N/A')}")
 
+    with tab4:
+        st.markdown("#### Hybrid GMM Results")
+        if "hybrid" in results:
+            hybrid = results["hybrid"]
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Overall Accuracy", f"{hybrid['accuracy']:.4f}")
+            col2.metric("Overall Macro F1", f"{hybrid['macro_f1']:.4f}")
+            col3.metric("In-Dist Accuracy", f"{hybrid['in_dist_accuracy']:.4f}")
+            col4.metric("In-Dist F1", f"{hybrid['in_dist_f1']:.4f}")
+
+            st.markdown("---")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("OOD Threshold", f"{hybrid['ood_threshold']:.2f}")
+            col2.metric("OOD Samples", f"{hybrid['n_ood_samples']} / {hybrid['n_total_samples']}")
+            col3.metric("OOD Detection Rate", f"{hybrid['ood_detection_rate']:.2%}")
+
+            st.markdown("---")
+            st.markdown("#### How it works")
+            st.markdown("""
+            1. DenseNet121 extracts 1024-dim embeddings from the penultimate layer
+            2. A 9-component GMM is fit on training embeddings
+            3. Test samples are scored via log-likelihood
+            4. Samples below the 5th-percentile threshold are flagged as OOD
+            5. Flagged samples can be routed for expert review instead of auto-classification
+            """)
+        else:
+            st.info("Hybrid GMM results not available. Run `python run.py --phase 2` first.")
+
+
+# ═══════════════════════════════════════════════════════════
+# PAGE: OOD Detection
+# ═══════════════════════════════════════════════════════════
+elif page == "OOD Detection":
+    st.markdown('<p class="main-header">OOD Detection</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Out-of-Distribution detection via GMM log-likelihood on DenseNet121 embeddings</p>',
+                unsafe_allow_html=True)
+
+    if "hybrid" not in results:
+        st.warning("Hybrid GMM results not available. Run `python run.py --phase 2` first.")
+    else:
+        hybrid = results["hybrid"]
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.markdown(f"""<div class="metric-card metric-blue">
+                <h2>{hybrid['n_ood_samples']}</h2><p>OOD Samples Flagged</p></div>""",
+                unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"""<div class="metric-card metric-purple">
+                <h2>{hybrid['ood_detection_rate']:.1%}</h2><p>OOD Detection Rate</p></div>""",
+                unsafe_allow_html=True)
+        with col3:
+            st.markdown(f"""<div class="metric-card metric-green">
+                <h2>{hybrid['in_dist_accuracy']:.1%}</h2><p>In-Dist Accuracy</p></div>""",
+                unsafe_allow_html=True)
+        with col4:
+            st.markdown(f"""<div class="metric-card metric-green">
+                <h2>{hybrid['in_dist_f1']:.1%}</h2><p>In-Dist Macro F1</p></div>""",
+                unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        tab1, tab2, tab3 = st.tabs(["t-SNE Visualization", "OOD Statistics", "Clinical Implications"])
+
+        with tab1:
+            tsne_path = os.path.join(PHASE2_TSNE, "tsne_ood.png")
+            if not os.path.exists(tsne_path):
+                tsne_path = os.path.join("results", "tsne_ood.png")
+            if os.path.exists(tsne_path):
+                st.image(tsne_path, use_container_width=True,
+                         caption="t-SNE of test embeddings — red crosses mark OOD samples")
+            else:
+                st.info("t-SNE plot not found. Run `python run.py --phase 2` to generate it.")
+
+        with tab2:
+            st.markdown("#### OOD Detection Summary")
+
+            n_total = hybrid["n_total_samples"]
+            n_ood = hybrid["n_ood_samples"]
+            n_indist = n_total - n_ood
+
+            col1, col2 = st.columns(2)
+            with col1:
+                fig, ax = plt.subplots(figsize=(6, 6))
+                sizes = [n_indist, n_ood]
+                labels = [f"In-Distribution\n({n_indist:,})", f"OOD / Uncertain\n({n_ood:,})"]
+                colors_pie = ["#38ef7d", "#ef5350"]
+                explode = (0, 0.05)
+                ax.pie(sizes, explode=explode, labels=labels, colors=colors_pie,
+                       autopct="%1.1f%%", startangle=90, textprops={"fontsize": 11})
+                ax.set_title("Test Set: In-Distribution vs OOD")
+                plt.tight_layout()
+                st.pyplot(fig)
+                plt.close()
+
+            with col2:
+                st.markdown(f"""
+                | Metric | Value |
+                |--------|-------|
+                | Total test samples | {n_total:,} |
+                | In-distribution | {n_indist:,} ({100 * n_indist / n_total:.1f}%) |
+                | OOD / uncertain | {n_ood:,} ({100 * n_ood / n_total:.1f}%) |
+                | OOD threshold | {hybrid['ood_threshold']:.2f} |
+                | In-dist accuracy | {hybrid['in_dist_accuracy']:.4f} |
+                | In-dist macro F1 | {hybrid['in_dist_f1']:.4f} |
+                | Overall accuracy | {hybrid['accuracy']:.4f} |
+                | Overall macro F1 | {hybrid['macro_f1']:.4f} |
+                """)
+
+            st.markdown("#### Accuracy Comparison: Overall vs In-Distribution")
+            fig, ax = plt.subplots(figsize=(8, 4))
+            categories = ["Overall", "In-Distribution Only"]
+            acc_vals = [hybrid["accuracy"], hybrid["in_dist_accuracy"]]
+            f1_vals = [hybrid["macro_f1"], hybrid["in_dist_f1"]]
+            x = np.arange(len(categories))
+            w = 0.35
+            b1 = ax.bar(x - w / 2, acc_vals, w, label="Accuracy", color="#4CAF50", alpha=0.85)
+            b2 = ax.bar(x + w / 2, f1_vals, w, label="Macro F1", color="#2196F3", alpha=0.85)
+            ax.set_xticks(x)
+            ax.set_xticklabels(categories)
+            ax.set_ylim(0, 1.1)
+            ax.legend()
+            ax.set_title("Model Performance: All Samples vs In-Distribution Only")
+            ax.grid(axis="y", alpha=0.3)
+            for b in b1:
+                ax.text(b.get_x() + b.get_width() / 2, b.get_height() + 0.02,
+                        f"{b.get_height():.4f}", ha="center", fontsize=10)
+            for b in b2:
+                ax.text(b.get_x() + b.get_width() / 2, b.get_height() + 0.02,
+                        f"{b.get_height():.4f}", ha="center", fontsize=10)
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close()
+
+        with tab3:
+            st.markdown("#### Why OOD Detection Matters in Medical Imaging")
+            st.markdown("""
+            In clinical settings, a model that **silently misclassifies** an unusual sample
+            is far more dangerous than one that **says "I don't know."**
+
+            MedGuard's hybrid approach provides this safety layer:
+
+            - **High-confidence predictions** (in-distribution) are passed through
+              with **{:.1%} accuracy** on trusted samples
+            - **Low-confidence predictions** (OOD) are flagged for **expert review**
+            - The clinician sees which samples the model is uncertain about,
+              enabling **human-in-the-loop** decision making
+
+            This is especially critical for:
+            - **Rare tissue types** not well-represented in training data
+            - **Artifact-corrupted slides** (e.g., staining issues, tissue folds)
+            - **Edge cases** between adjacent tissue classes
+            """.format(hybrid["in_dist_accuracy"]))
+
 
 # ═══════════════════════════════════════════════════════════
 # PAGE: Live Classification
 # ═══════════════════════════════════════════════════════════
 elif page == "Live Classification":
     st.markdown('<p class="main-header">Live Classification</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Pick a test image and see predictions from both models</p>',
+    st.markdown('<p class="sub-header">Pick a test image and see predictions from all models + OOD scoring</p>',
                 unsafe_allow_html=True)
 
     col_ctrl, col_img = st.columns([1, 3])
@@ -460,6 +754,23 @@ elif page == "Live Classification":
                  caption=f"Test #{idx}", use_container_width=True)
         st.markdown(f"**True label:** {true_label} — {CLASS_NAMES[true_label]}")
 
+        # OOD score panel
+        st.markdown("---")
+        st.markdown("### 🔍 OOD Assessment")
+        ood_score, is_ood = get_ood_score(image)
+        if ood_score is not None:
+            threshold = results.get("hybrid", {}).get("ood_threshold", 0)
+            if is_ood:
+                st.markdown(f'<div class="ood-flagged">⚠ OOD / Uncertain</div>',
+                            unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div class="ood-safe">✓ In-Distribution</div>',
+                            unsafe_allow_html=True)
+            st.markdown(f"**Log-likelihood:** {ood_score:.2f}")
+            st.markdown(f"**Threshold:** {threshold:.2f}")
+        else:
+            st.info("GMM model not loaded.")
+
     with col_img:
         col_svm, col_resnet = st.columns(2)
 
@@ -474,7 +785,6 @@ elif page == "Live Classification":
                 else:
                     st.error(f"Wrong! (True: {CLASS_NAMES[true_label]})")
 
-                # Confidence bar chart
                 fig, ax = plt.subplots(figsize=(6, 4))
                 colors = ["#4CAF50" if i == true_label else "#ef5350" if i == svm_pred and not is_correct
                           else "#90CAF9" for i in range(9)]
@@ -491,8 +801,8 @@ elif page == "Live Classification":
                 st.warning("SVM model not loaded. Run baseline_ml.py first.")
 
         with col_resnet:
-            st.markdown("### ResNet18 Prediction")
-            dl_pred, dl_probs = predict_single_resnet(image)
+            st.markdown("### DenseNet121 Prediction")
+            dl_pred, dl_probs = predict_single_densenet(image)
             if dl_pred is not None:
                 is_correct = dl_pred == true_label
                 st.markdown(f"**Predicted:** {dl_pred} — {CLASS_NAMES[dl_pred]}")
@@ -508,15 +818,19 @@ elif page == "Live Classification":
                 ax.set_yticks(range(9))
                 ax.set_yticklabels([f"{i}: {n[:15]}" for i, n in enumerate(CLASS_NAMES)], fontsize=8)
                 ax.set_xlabel("Confidence")
-                ax.set_title("ResNet18 Softmax Probabilities")
+                ax.set_title("DenseNet121 Softmax Probabilities")
                 ax.invert_yaxis()
                 plt.tight_layout()
                 st.pyplot(fig)
                 plt.close()
 
                 st.markdown(f"**Top confidence:** {dl_probs.max():.1%}")
+
+                if ood_score is not None and is_ood:
+                    st.warning("⚠ This sample is flagged as **OOD** by the Hybrid GMM. "
+                               "In a clinical setting, this prediction would be routed for expert review.")
             else:
-                st.warning("ResNet model not loaded. Run dl_model.py first.")
+                st.warning("DenseNet model not loaded. Run dl_model.py first.")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -527,7 +841,7 @@ elif page == "Technical Details":
     st.markdown('<p class="sub-header">Model architectures, hyperparameters, and methodology</p>',
                 unsafe_allow_html=True)
 
-    tab1, tab2, tab3 = st.tabs(["HOG + SVM", "ResNet18", "Project Structure"])
+    tab1, tab2, tab3, tab4 = st.tabs(["HOG + SVM", "DenseNet121", "Hybrid GMM", "Project Structure"])
 
     with tab1:
         st.markdown("""
@@ -553,11 +867,12 @@ elif page == "Technical Details":
 
     with tab2:
         st.markdown("""
-        ### Fine-tuned ResNet18
+        ### Fine-tuned DenseNet121
 
         **Architecture:**
         - Pretrained on ImageNet (transfer learning)
-        - Modified classifier head: Dropout(0.3) → Linear(512, 9)
+        - Dense connectivity: each layer receives features from all preceding layers
+        - Modified classifier head: Dropout(0.3) → Linear(1024, 9)
         - Input: 64x64 RGB with standard ImageNet normalization
 
         **Training:**
@@ -571,6 +886,34 @@ elif page == "Technical Details":
         st.latex(r"\mathcal{L} = -\sum_{c=1}^{C} w_c \cdot y_c \log(\hat{y}_c), \quad w_c = \frac{N}{C \cdot N_c}")
 
     with tab3:
+        st.markdown("""
+        ### Hybrid GMM — Uncertainty-Aware OOD Detection
+
+        **Pipeline:**
+        1. Load fine-tuned DenseNet121 and extract 512-dim penultimate layer embeddings
+        2. Fit a 9-component full-covariance GMM on training embeddings
+        3. Score test samples via log-likelihood
+        4. OOD threshold = 5th percentile of training log-likelihoods
+        5. Flag samples below threshold as out-of-distribution
+
+        **GMM Parameters:**
+        - Components: 9 (one per class)
+        - Covariance type: full
+        - Max iterations: 200, n_init: 3
+
+        **t-SNE Visualization:**
+        - Perplexity: 30, max iterations: 1,000
+        - Max samples: 5,000 (subsampled for visualization)
+
+        **GMM Log-Likelihood:**
+        """)
+        st.latex(r"\log p(\mathbf{x}) = \log \sum_{k=1}^{K} \pi_k \cdot \mathcal{N}(\mathbf{x} \mid \boldsymbol{\mu}_k, \boldsymbol{\Sigma}_k)")
+        st.markdown("Where $\\pi_k$ are mixture weights, $\\boldsymbol{\\mu}_k$ are component means, "
+                    "and $\\boldsymbol{\\Sigma}_k$ are covariance matrices.")
+        st.markdown("**OOD Decision Rule:**")
+        st.latex(r"\text{is\_ood}(\mathbf{x}) = \mathbb{1}\left[\log p(\mathbf{x}) < \tau\right], \quad \tau = \text{percentile}_5(\{\log p(\mathbf{x}_i)\}_{i=1}^{N_{\text{train}}})")
+
+    with tab4:
         st.markdown("### Project Structure")
         st.code("""
 MedGuard/
@@ -581,14 +924,16 @@ MedGuard/
 ├── src/
 │   ├── data_loader.py      # PathMNIST loading + class weights
 │   ├── data_exploration.py  # EDA plots
-│   ├── baseline_ml.py       # HOG + SVM
-│   ├── dl_model.py          # ResNet18 fine-tuning
-│   ├── hybrid_gmm.py        # GMM + OOD (Phase 2)
+│   ├── baseline_ml.py       # HOG + SVM (Phase 1)
+│   ├── dl_model.py          # DenseNet121 fine-tuning (Phase 1)
+│   ├── hybrid_gmm.py        # GMM + OOD detection (Phase 2)
 │   ├── evaluate.py          # Unified evaluation
 │   ├── visualize.py         # Visualization utils
-│   └── ablation_study.py    # Model comparison
-├── models/             # Saved weights
-├── results/            # Figures + JSON reports
+│   └── ablation_study.py    # Model comparison / ablation
+├── models/             # Saved weights (SVM, DenseNet121, GMM)
+├── results/
+│   ├── phase1/         # EDA, baseline, DL results
+│   └── phase2/         # Hybrid GMM, t-SNE, ablation
 └── report/
     └── main.tex        # LaTeX paper
         """, language="text")

@@ -1,9 +1,9 @@
 """
-Hybrid GMM model: Gaussian Mixture Model on ResNet18 embeddings for
+Hybrid GMM model: Gaussian Mixture Model on DenseNet121 embeddings for
 uncertainty-aware classification and OOD detection.
 
 Pipeline:
-1. Load fine-tuned ResNet18 and extract 512-dim penultimate layer embeddings
+1. Load fine-tuned DenseNet121 and extract 1024-dim penultimate layer embeddings
 2. Fit GMM (n_components=9) on training embeddings
 3. Score test samples via log-likelihood
 4. OOD threshold = 5th percentile of training log-likelihoods
@@ -38,25 +38,37 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available()
                        else "cpu")
 
 
-def load_resnet_backbone():
-    """Load fine-tuned ResNet18 and create embedding extractor."""
-    model = models.resnet18(weights=None)
-    model.fc = nn.Sequential(
+class _DenseNetEmbedding(nn.Module):
+    """Extract embeddings from DenseNet121 features (before classifier)."""
+    def __init__(self, features):
+        super().__init__()
+        self.features = features
+
+    def forward(self, x):
+        f = self.features(x)
+        f = nn.functional.relu(f, inplace=True)
+        f = nn.functional.adaptive_avg_pool2d(f, (1, 1))
+        return f
+
+
+def load_densenet_backbone():
+    """Load fine-tuned DenseNet121 and create embedding extractor."""
+    model = models.densenet121(weights=None)
+    model.classifier = nn.Sequential(
         nn.Dropout(0.3),
-        nn.Linear(512, 9)
+        nn.Linear(1024, 9)
     )
 
-    state_dict_path = os.path.join(MODELS_DIR, "resnet18_pathmnist.pth")
+    state_dict_path = os.path.join(MODELS_DIR, "densenet121_pathmnist.pth")
     if os.path.exists(state_dict_path):
         model.load_state_dict(torch.load(state_dict_path, map_location=DEVICE,
                                          weights_only=True))
-        print("Loaded fine-tuned ResNet18 weights.")
+        print("Loaded fine-tuned DenseNet121 weights.")
     else:
         print("WARNING: No fine-tuned weights found. Using random initialization.")
-        print("Run dl_model.py first to train the ResNet18.")
+        print("Run dl_model.py first to train the DenseNet121.")
 
-    # Remove the FC layer to get embeddings
-    embedding_model = nn.Sequential(*list(model.children())[:-1])
+    embedding_model = _DenseNetEmbedding(model.features)
     embedding_model = embedding_model.to(DEVICE)
     embedding_model.eval()
     return embedding_model, model
@@ -64,7 +76,7 @@ def load_resnet_backbone():
 
 @torch.no_grad()
 def extract_embeddings(model, loader):
-    """Extract 512-dim embeddings from the penultimate layer."""
+    """Extract 1024-dim embeddings from the penultimate layer."""
     model.eval()
     all_embeddings = []
     all_labels = []
@@ -159,7 +171,7 @@ def run_hybrid_gmm(output_dir=None, tsne_dir=None):
     train_loader, val_loader, test_loader, _ = load_pathmnist(
         mode="dl", batch_size=128)
 
-    embedding_model, full_model = load_resnet_backbone()
+    embedding_model, full_model = load_densenet_backbone()
     print("Extracting training embeddings...")
     train_emb, train_labels = extract_embeddings(embedding_model, train_loader)
     print(f"Training embeddings shape: {train_emb.shape}")
@@ -191,7 +203,7 @@ def run_hybrid_gmm(output_dir=None, tsne_dir=None):
     print(f"  OOD detection rate: {is_ood.mean():.4f}")
 
     results = {
-        "model": "Hybrid GMM (ResNet18 embeddings)",
+        "model": "Hybrid GMM (DenseNet121 embeddings)",
         "accuracy": float(overall_acc),
         "macro_f1": float(overall_f1),
         "in_dist_accuracy": float(in_dist_acc),

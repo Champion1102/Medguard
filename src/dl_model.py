@@ -10,10 +10,10 @@
 
 
 """
-Deep Learning model: Fine-tuned ResNet18 for PathMNIST classification.
+Deep Learning model: Fine-tuned DenseNet121 for PathMNIST classification.
 
-Uses pretrained ImageNet weights, replaces the final FC layer with a
-dropout + linear classifier for 9 classes. Training uses class-weighted
+Uses pretrained ImageNet weights, replaces the final classifier with a
+dropout + linear head for 9 classes. Training uses class-weighted
 CrossEntropyLoss, Adam optimizer, and ReduceLROnPlateau scheduler with
 early stopping (patience=5).
 """
@@ -45,10 +45,10 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available()
 
 
 def build_model(num_classes=9, dropout=0.3):
-    """Build ResNet18 with custom classifier head."""
-    model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
-    in_features = model.fc.in_features  # 512
-    model.fc = nn.Sequential(
+    """Build DenseNet121 with custom classifier head."""
+    model = models.densenet121(weights=models.DenseNet121_Weights.DEFAULT)
+    in_features = model.classifier.in_features  # 1024
+    model.classifier = nn.Sequential(
         nn.Dropout(dropout),
         nn.Linear(in_features, num_classes)
     )
@@ -188,8 +188,8 @@ def train(num_epochs=30, patience=5, lr=1e-4, batch_size=64, output_dir=None):
 
     # Restore best model
     model.load_state_dict(best_model_state)
-    torch.save(best_model_state, os.path.join(MODELS_DIR, "resnet18_pathmnist.pth"))
-    print(f"  Saved best model to {MODELS_DIR}/resnet18_pathmnist.pth")
+    torch.save(best_model_state, os.path.join(MODELS_DIR, "densenet121_pathmnist.pth"))
+    print(f"  Saved best model to {MODELS_DIR}/densenet121_pathmnist.pth")
 
     # Test evaluation
     test_loss, test_f1, test_preds, test_labels = evaluate(
@@ -199,7 +199,7 @@ def train(num_epochs=30, patience=5, lr=1e-4, batch_size=64, output_dir=None):
 
     # Save results
     results = {
-        "model": "ResNet18 (fine-tuned)",
+        "model": "DenseNet121 (fine-tuned)",
         "accuracy": float(test_acc),
         "macro_f1": float(test_f1),
         "test_loss": float(test_loss),

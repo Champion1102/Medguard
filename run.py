@@ -16,7 +16,7 @@ import time
 from config import (
     PHASE1_EDA, PHASE1_BASELINE, PHASE1_DL,
     PHASE2_TSNE, PHASE2_ABLATION, PHASE2_RESULTS,
-    SVM_MODEL_PATH, RESNET_MODEL_PATH, GMM_MODEL_PATH,
+    SVM_MODEL_PATH, DENSENET_MODEL_PATH, GMM_MODEL_PATH,
     RESULTS_DIR,
 )
 
@@ -35,7 +35,7 @@ def phase_has_results(phase_dir):
 
 
 def run_phase1(demo=False, force=False):
-    """Phase 1: EDA + SVM Baseline + ResNet18."""
+    """Phase 1: EDA + SVM Baseline + DenseNet121."""
     print("\n" + "=" * 60)
     print("  PHASE 1: BASELINE & EDA")
     print("=" * 60)
@@ -96,13 +96,13 @@ def run_phase1(demo=False, force=False):
         evaluate_and_save(svm, scaler, X_test, test_labels,
                           output_dir=PHASE1_BASELINE)
 
-    # --- Step 3: ResNet18 ---
+    # --- Step 3: DenseNet121 ---
     if not force and phase_has_results(PHASE1_DL):
-        print("\n[3/3] [CACHED] ResNet18 results found, skipping...")
+        print("\n[3/3] [CACHED] DenseNet121 results found, skipping...")
     elif demo:
-        print("\n[3/3] [DEMO] Loading saved ResNet18 model...")
-        if not os.path.exists(RESNET_MODEL_PATH):
-            print("  ERROR: No saved ResNet18 model found. Run without --demo first.")
+        print("\n[3/3] [DEMO] Loading saved DenseNet121 model...")
+        if not os.path.exists(DENSENET_MODEL_PATH):
+            print("  ERROR: No saved DenseNet121 model found. Run without --demo first.")
             return False
         from src.dl_model import evaluate, build_model, plot_training_curves
         from src.data_loader import load_pathmnist, compute_class_weights
@@ -115,7 +115,7 @@ def run_phase1(demo=False, force=False):
                               else "mps" if torch.backends.mps.is_available()
                               else "cpu")
         model = build_model().to(device)
-        model.load_state_dict(torch.load(RESNET_MODEL_PATH, map_location=device,
+        model.load_state_dict(torch.load(DENSENET_MODEL_PATH, map_location=device,
                                          weights_only=True))
 
         _, _, test_loader, _ = load_pathmnist(mode="dl", batch_size=64)
@@ -128,7 +128,7 @@ def run_phase1(demo=False, force=False):
         print(f"  Test Acc: {test_acc:.4f}, F1: {test_f1:.4f}")
 
         results = {
-            "model": "ResNet18 (fine-tuned)",
+            "model": "DenseNet121 (fine-tuned)",
             "accuracy": float(test_acc),
             "macro_f1": float(test_f1),
             "test_loss": float(test_loss),
@@ -136,7 +136,7 @@ def run_phase1(demo=False, force=False):
         with open(os.path.join(PHASE1_DL, "dl_results.json"), "w") as f:
             json.dump(results, f, indent=2)
     else:
-        print("\n[3/3] Training ResNet18...")
+        print("\n[3/3] Training DenseNet121...")
         from src.dl_model import train
         train(output_dir=PHASE1_DL)
 
@@ -159,7 +159,7 @@ def print_phase1_summary():
     print(f"\n  {'Model':<20} {'Accuracy':>10} {'Macro F1':>10}")
     print("  " + "-" * 42)
 
-    for name, path in [("HOG + SVM", svm_path), ("ResNet18", dl_path)]:
+    for name, path in [("HOG + SVM", svm_path), ("DenseNet121", dl_path)]:
         if os.path.exists(path):
             with open(path) as f:
                 data = json.load(f)

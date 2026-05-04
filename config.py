@@ -24,7 +24,7 @@ PHASE2_ABLATION = os.path.join(PHASE2_RESULTS, "ablation")
 
 # Saved model paths
 SVM_MODEL_PATH = os.path.join(MODELS_DIR, "baseline_svm.pkl")
-RESNET_MODEL_PATH = os.path.join(MODELS_DIR, "resnet18_pathmnist.pth")
+DENSENET_MODEL_PATH = os.path.join(MODELS_DIR, "densenet121_pathmnist.pth")
 GMM_MODEL_PATH = os.path.join(MODELS_DIR, "hybrid_gmm.pkl")
 
 # === Dataset ===

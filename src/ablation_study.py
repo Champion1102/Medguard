@@ -23,7 +23,7 @@ def load_all_results():
     results = {}
     files = {
         "HOG + SVM": ["phase1/baseline/baseline_results.json", "baseline_results.json"],
-        "ResNet18": ["phase1/dl/dl_results.json", "dl_results.json"],
+        "DenseNet121": ["phase1/dl/dl_results.json", "dl_results.json"],
         "Hybrid GMM": ["phase2/hybrid_results.json", "hybrid_results.json"],
     }
     for name, candidates in files.items():

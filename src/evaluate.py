@@ -60,14 +60,14 @@ def evaluate_baseline():
 
 
 def evaluate_dl():
-    """Evaluate ResNet18 on test set."""
-    model_path = os.path.join(MODELS_DIR, "resnet18_pathmnist.pth")
+    """Evaluate DenseNet121 on test set."""
+    model_path = os.path.join(MODELS_DIR, "densenet121_pathmnist.pth")
     if not os.path.exists(model_path):
-        print("ResNet18 model not found. Run dl_model.py first.")
+        print("DenseNet121 model not found. Run dl_model.py first.")
         return None
 
-    model = models.resnet18(weights=None)
-    model.fc = nn.Sequential(nn.Dropout(0.3), nn.Linear(512, 9))
+    model = models.densenet121(weights=None)
+    model.classifier = nn.Sequential(nn.Dropout(0.3), nn.Linear(1024, 9))
     model.load_state_dict(torch.load(model_path, map_location=DEVICE,
                                      weights_only=True))
     model = model.to(DEVICE)
@@ -96,7 +96,7 @@ def evaluate_dl():
     y_bin = label_binarize(all_labels, classes=range(9))
     auroc = roc_auc_score(y_bin, all_probs, multi_class="ovr", average="macro")
 
-    return {"model": "ResNet18", "accuracy": acc, "macro_f1": f1,
+    return {"model": "DenseNet121", "accuracy": acc, "macro_f1": f1,
             "auroc": auroc, "ood_rate": "N/A"}
 
 
