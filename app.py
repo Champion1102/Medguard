@@ -510,7 +510,9 @@ elif page == "Model Comparison":
     st.markdown('<p class="sub-header">HOG + SVM vs DenseNet121 vs Hybrid GMM</p>',
                 unsafe_allow_html=True)
 
-    tab1, tab2, tab3, tab4 = st.tabs(["Summary", "SVM Details", "DenseNet121 Details", "Hybrid GMM Details"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Summary", "Architecture Evolution",
+                                              "SVM Details", "DenseNet121 Details",
+                                              "Hybrid GMM Details"])
 
     with tab1:
         col1, col2 = st.columns(2)
@@ -593,6 +595,87 @@ elif page == "Model Comparison":
                 st.dataframe(rows, use_container_width=True, hide_index=True)
 
     with tab2:
+        st.markdown("#### Why DenseNet-121 over ResNet-18?")
+        st.markdown("""
+        We initially implemented **ResNet-18** as our deep learning model.
+        After evaluating its performance, we researched alternatives and found
+        that **DenseNet-121** is better suited for medical image classification
+        due to its dense connectivity pattern — each layer receives feature maps
+        from *all* preceding layers, enabling better feature reuse on small images.
+        """)
+
+        resnet_path = os.path.join("results", "resnet18_baseline", "dl_results.json")
+        densenet_path = os.path.join(PHASE1_DL, "dl_results.json")
+
+        if os.path.exists(resnet_path) and os.path.exists(densenet_path):
+            with open(resnet_path) as f:
+                resnet = json.load(f)
+            with open(densenet_path) as f:
+                densenet = json.load(f)
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown(f"""<div class="metric-card metric-orange">
+                    <h2>{resnet['accuracy']:.1%}</h2>
+                    <p>ResNet-18 Accuracy</p></div>""", unsafe_allow_html=True)
+            with col2:
+                st.markdown(f"""<div class="metric-card metric-green">
+                    <h2>{densenet['accuracy']:.1%}</h2>
+                    <p>DenseNet-121 Accuracy</p></div>""", unsafe_allow_html=True)
+
+            st.markdown("")
+
+            fig, ax = plt.subplots(figsize=(10, 5))
+            models_cmp = ["ResNet-18", "DenseNet-121"]
+            accs_cmp = [resnet["accuracy"], densenet["accuracy"]]
+            f1s_cmp = [resnet["macro_f1"], densenet["macro_f1"]]
+            x = np.arange(2)
+            w = 0.3
+            b1 = ax.bar(x - w / 2, accs_cmp, w, label="Accuracy",
+                         color=["#FF9800", "#4CAF50"], alpha=0.85)
+            b2 = ax.bar(x + w / 2, f1s_cmp, w, label="Macro F1",
+                         color=["#FFB74D", "#66BB6A"], alpha=0.85)
+            ax.set_xticks(x)
+            ax.set_xticklabels(models_cmp, fontsize=12)
+            ax.set_ylim(0.9, 0.96)
+            ax.legend()
+            ax.set_title("Architecture Comparison: ResNet-18 vs DenseNet-121")
+            ax.grid(axis="y", alpha=0.3)
+            for b in list(b1) + list(b2):
+                ax.text(b.get_x() + b.get_width() / 2, b.get_height() + 0.001,
+                        f"{b.get_height():.4f}", ha="center", fontsize=10)
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close()
+
+            acc_delta = densenet["accuracy"] - resnet["accuracy"]
+            f1_delta = densenet["macro_f1"] - resnet["macro_f1"]
+            st.markdown(f"""
+            | Metric | ResNet-18 | DenseNet-121 | Improvement |
+            |--------|-----------|-------------|-------------|
+            | Accuracy | {resnet['accuracy']:.4f} | {densenet['accuracy']:.4f} | +{acc_delta:.4f} |
+            | Macro F1 | {resnet['macro_f1']:.4f} | {densenet['macro_f1']:.4f} | +{f1_delta:.4f} |
+            | Best Epoch | {resnet.get('best_epoch', 'N/A')} | {densenet.get('best_epoch', 'N/A')} | — |
+            | Embedding Dim | 512 | 1024 | 2x richer |
+            """)
+
+            st.markdown("""
+            **Key advantages of DenseNet-121:**
+            - Dense connectivity enables better gradient flow and feature reuse
+            - 1024-dim embeddings provide richer representations for GMM
+            - Published benchmarks on MedMNIST confirm DenseNet-121 outperforms ResNet-18
+            - Better suited for small medical images where every feature matters
+            """)
+
+            curves_path = os.path.join("results", "resnet18_baseline",
+                                       "dl_training_curves.png")
+            if os.path.exists(curves_path):
+                st.markdown("#### ResNet-18 Training Curves (for reference)")
+                st.image(curves_path, use_container_width=True)
+        else:
+            st.info("ResNet-18 baseline results not found in `results/resnet18_baseline/`.")
+
+    with tab3:
         st.markdown("#### SVM Confusion Matrix")
         cm_path = os.path.join(PHASE1_BASELINE, "baseline_confusion_matrix.png")
         if not os.path.exists(cm_path):

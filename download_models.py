@@ -16,6 +16,7 @@ FILES = {
     "models/baseline_svm.pkl": f"{BASE_URL}/baseline_svm.pkl",
     "models/densenet121_pathmnist.pth": f"{BASE_URL}/densenet121_pathmnist.pth",
     "models/hybrid_gmm.pkl": f"{BASE_URL}/hybrid_gmm.pkl",
+    "models/resnet18_pathmnist.pth": f"{BASE_URL}/resnet18_pathmnist.pth",
     "data/pathmnist.npz": f"{BASE_URL}/pathmnist.npz",
 }
 
