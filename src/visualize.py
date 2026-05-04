@@ -24,60 +24,102 @@ RESULTS_DIR = "results"
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 
-def plot_architecture_diagram():
-    """Draw MedGuard architecture flow diagram."""
-    fig, ax = plt.subplots(figsize=(16, 8))
-    ax.set_xlim(0, 16)
-    ax.set_ylim(0, 8)
+def plot_architecture_diagram(output_dir=None):
+    """Draw publication-ready MedGuard architecture flow diagram."""
+    out = output_dir or RESULTS_DIR
+    os.makedirs(out, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(18, 10))
+    ax.set_xlim(0, 18)
+    ax.set_ylim(-1, 10)
     ax.axis("off")
 
-    # Helper to draw boxes
-    def draw_box(x, y, w, h, text, color="#4CAF50", fontsize=9):
-        rect = mpatches.FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.1",
-                                        facecolor=color, edgecolor="black",
-                                        linewidth=1.5, alpha=0.85)
+    def draw_box(x, y, w, h, text, color, fontsize=8, edgecolor="black"):
+        rect = mpatches.FancyBboxPatch(
+            (x, y), w, h, boxstyle="round,pad=0.15",
+            facecolor=color, edgecolor=edgecolor, linewidth=1.5, alpha=0.9)
         ax.add_patch(rect)
         ax.text(x + w / 2, y + h / 2, text, ha="center", va="center",
-                fontsize=fontsize, fontweight="bold", wrap=True)
+                fontsize=fontsize, fontweight="bold")
 
-    def draw_arrow(x1, y1, x2, y2):
+    def draw_arrow(x1, y1, x2, y2, color="#555", style="->"):
         ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
-                     arrowprops=dict(arrowstyle="->", lw=2, color="#333"))
+                     arrowprops=dict(arrowstyle=style, lw=1.8, color=color))
 
-    # Input
-    draw_box(0.5, 3.5, 2.5, 1, "PathMNIST\n28x28, 9 classes", "#E3F2FD")
+    # === Input ===
+    draw_box(0.3, 4.2, 2.4, 1.2, "PathMNIST\n28x28 RGB\n9 tissue classes",
+             "#E3F2FD", fontsize=8)
 
-    # Branch 1: HOG + SVM
-    draw_arrow(3, 4, 4, 6.5)
-    draw_box(4, 6, 2.2, 1, "HOG Features\n(64x64)", "#FFF9C4")
-    draw_arrow(6.2, 6.5, 7.5, 6.5)
-    draw_box(7.5, 6, 2.2, 1, "SVM\n(RBF Kernel)", "#FFCCBC")
-    draw_arrow(9.7, 6.5, 11, 6.5)
-    draw_box(11, 6, 2.5, 1, "Baseline\nPredictions", "#C8E6C9")
+    # === Tier 1: HOG + SVM ===
+    draw_arrow(2.7, 5.2, 3.8, 7.8, "#FF9800")
+    draw_box(3.8, 7.3, 2.0, 1.0, "HOG Features\n1764-dim", "#FFF9C4")
+    draw_arrow(5.8, 7.8, 7.0, 7.8, "#FF9800")
+    draw_box(7.0, 7.3, 2.0, 1.0, "SVM\n(RBF, C=10)", "#FFCCBC")
+    draw_arrow(9.0, 7.8, 10.2, 7.8, "#FF9800")
+    draw_box(10.2, 7.3, 2.0, 1.0, "Baseline\n48.1% Acc", "#FFE0B2")
 
-    # Branch 2: DenseNet121
-    draw_arrow(3, 4, 4, 4)
-    draw_box(4, 3.5, 2.2, 1, "DenseNet121\n(Fine-tuned)", "#E1BEE7")
-    draw_arrow(6.2, 4, 7.5, 4)
-    draw_box(7.5, 3.5, 2.2, 1, "DL\nPredictions", "#C8E6C9")
+    ax.text(6.5, 8.8, "Tier 1: Traditional ML Baseline",
+            fontsize=9, fontstyle="italic", color="#E65100", ha="center")
 
-    # Branch 3: Embeddings -> GMM
-    draw_arrow(6.2, 3.8, 7.5, 1.5)
-    draw_box(7.5, 1, 2.2, 1, "1024-dim\nEmbeddings", "#B3E5FC")
-    draw_arrow(9.7, 1.5, 11, 1.5)
-    draw_box(11, 1, 2.2, 1, "GMM\n(9 comp.)", "#FFE0B2")
-    draw_arrow(13.2, 1.5, 14, 2.5)
-    draw_box(14, 2.2, 1.5, 0.7, "OOD\nDetection", "#EF9A9A")
-    draw_arrow(13.2, 1.5, 14, 1)
-    draw_box(14, 0.5, 1.5, 0.7, "Uncertainty\nScore", "#FFAB91")
+    # === Tier 2: DenseNet121 ===
+    draw_arrow(2.7, 4.8, 3.8, 4.8, "#7B1FA2")
+    draw_box(3.8, 4.2, 2.4, 1.2, "DenseNet121\n(fine-tuned)\nImageNet init",
+             "#E1BEE7", fontsize=8)
+    draw_arrow(6.2, 4.8, 7.4, 4.8, "#7B1FA2")
+    draw_box(7.4, 4.3, 2.0, 1.0, "Softmax\n9 classes", "#CE93D8")
+    draw_arrow(9.4, 4.8, 10.2, 4.8, "#7B1FA2")
+    draw_box(10.2, 4.3, 2.0, 1.0, "DL Prediction\n94.7% Acc", "#D1C4E9")
 
-    ax.set_title("MedGuard Architecture: Uncertainty-Aware Hybrid Classification",
-                 fontsize=14, fontweight="bold", pad=20)
+    ax.text(6.5, 5.9, "Tier 2: Deep Learning Classifier",
+            fontsize=9, fontstyle="italic", color="#6A1B9A", ha="center")
+
+    # === Tier 3: GMM + OOD ===
+    draw_arrow(6.2, 4.4, 7.4, 2.0, "#1565C0")
+    draw_box(7.4, 1.4, 2.0, 1.2, "1024-dim\nEmbeddings\n(avg pool)", "#B3E5FC")
+    draw_arrow(9.4, 2.0, 10.6, 2.0, "#1565C0")
+    draw_box(10.6, 1.4, 2.0, 1.2, "GMM\n9 components\nfull cov.", "#81D4FA")
+    draw_arrow(12.6, 2.0, 13.8, 2.0, "#1565C0")
+    draw_box(13.8, 1.4, 2.2, 1.2, "OOD Score\n(log-likelihood\nvs threshold)", "#4FC3F7")
+
+    ax.text(10.5, 3.1, "Tier 3: Uncertainty Estimation (GMM)",
+            fontsize=9, fontstyle="italic", color="#0D47A1", ha="center")
+
+    # === Clinical Decision ===
+    draw_arrow(12.2, 4.8, 14.0, 4.8, "#333")
+    draw_arrow(16.0, 2.0, 16.0, 4.0, "#C62828")
+
+    draw_box(14.0, 4.0, 3.5, 1.6, "", "#F5F5F5", edgecolor="#333")
+    ax.text(15.75, 5.2, "Clinical Decision", ha="center", va="center",
+            fontsize=9, fontweight="bold")
+    ax.text(15.75, 4.7, "In-dist: Model prediction",
+            ha="center", va="center", fontsize=7, color="#2E7D32")
+    ax.text(15.75, 4.3, "OOD: Defer to clinician",
+            ha="center", va="center", fontsize=7, color="#C62828")
+
+    # === Training Techniques (bottom) ===
+    y_tech = -0.3
+    tech_w, tech_h = 3.2, 0.7
+    gap = 0.4
+    x_start = 1.5
+    techniques = [
+        ("Mixup (α=0.2)", "#E8F5E9"),
+        ("Label Smoothing (0.1)", "#E8F5E9"),
+        ("Stain Augmentation", "#E8F5E9"),
+        ("Test-Time Aug (x10)", "#E8F5E9"),
+    ]
+    for i, (name, color) in enumerate(techniques):
+        x = x_start + i * (tech_w + gap)
+        draw_box(x, y_tech, tech_w, tech_h, name, color, fontsize=7)
+
+    ax.text(9, 0.8, "Training & Inference Enhancements",
+            fontsize=9, fontstyle="italic", color="#1B5E20", ha="center")
+
+    ax.set_title("MedGuard: Uncertainty-Aware Hybrid Classification Pipeline",
+                 fontsize=14, fontweight="bold", pad=15)
     plt.tight_layout()
-    plt.savefig(os.path.join(RESULTS_DIR, "architecture_diagram.png"), dpi=150,
-                bbox_inches="tight")
+    out_path = os.path.join(out, "architecture_diagram.png")
+    plt.savefig(out_path, dpi=200, bbox_inches="tight")
     plt.close()
-    print(f"Saved architecture diagram to {RESULTS_DIR}/architecture_diagram.png")
+    print(f"Saved architecture diagram to {out_path}")
 
 
 def plot_all_confusion_matrices():

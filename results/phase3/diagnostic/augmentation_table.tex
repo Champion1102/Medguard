@@ -1,0 +1,15 @@
+\begin{table}[h]
+\centering
+\caption{Training Augmentation Techniques}
+\label{tab:augmentation}
+\begin{tabular}{lp{7cm}}
+\toprule
+Technique & Purpose \\
+\midrule
+Mixup ($\alpha\!=\!0.2$) & Regularization via convex combinations of training pairs; reduces overconfidence \\
+Label Smoothing (0.1) & Prevents hard-label overfitting; improves calibration \\
+Stain Augmentation & ColorJitter + RandomErasing to simulate H\&E staining variation across labs \\
+Test-Time Augmentation & Averages predictions over 10 augmented views for robust inference \\
+\bottomrule
+\end{tabular}
+\end{table}

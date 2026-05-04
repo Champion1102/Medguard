@@ -1,11 +1,11 @@
 {
-  "model": "Hybrid GMM (ResNet18 embeddings)",
-  "accuracy": 0.936908077994429,
-  "macro_f1": 0.9185528367919922,
-  "in_dist_accuracy": 0.9733705772811918,
-  "in_dist_f1": 0.9581449065113353,
-  "ood_detection_rate": 0.2520891364902507,
-  "ood_threshold": 148.47821044921875,
-  "n_ood_samples": 1810,
+  "model": "Hybrid GMM (DenseNet121 embeddings)",
+  "accuracy": 0.9467966573816156,
+  "macro_f1": 0.9259930485547009,
+  "in_dist_accuracy": 0.983420740991372,
+  "in_dist_f1": 0.9625694149920684,
+  "ood_detection_rate": 0.1767409470752089,
+  "ood_threshold": 1961.503662109375,
+  "n_ood_samples": 1269,
   "n_total_samples": 7180
 }

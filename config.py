@@ -22,6 +22,10 @@ PHASE2_RESULTS = os.path.join(RESULTS_DIR, "phase2")
 PHASE2_TSNE = os.path.join(PHASE2_RESULTS, "tsne")
 PHASE2_ABLATION = os.path.join(PHASE2_RESULTS, "ablation")
 
+PHASE3_RESULTS = os.path.join(RESULTS_DIR, "phase3")
+PHASE3_GRADCAM = os.path.join(PHASE3_RESULTS, "gradcam")
+PHASE3_DIAGNOSTIC = os.path.join(PHASE3_RESULTS, "diagnostic")
+
 # Saved model paths
 SVM_MODEL_PATH = os.path.join(MODELS_DIR, "baseline_svm.pkl")
 DENSENET_MODEL_PATH = os.path.join(MODELS_DIR, "densenet121_pathmnist.pth")

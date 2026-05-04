@@ -17,6 +17,7 @@ from src.data_loader import get_raw_data, CLASS_NAMES, compute_class_weights
 from config import (
     MODELS_DIR, PHASE1_EDA, PHASE1_BASELINE, PHASE1_DL,
     PHASE2_RESULTS, PHASE2_TSNE, PHASE2_ABLATION,
+    PHASE3_RESULTS, PHASE3_GRADCAM, PHASE3_DIAGNOSTIC,
     SVM_MODEL_PATH, DENSENET_MODEL_PATH, GMM_MODEL_PATH,
 )
 
@@ -95,6 +96,16 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+
+# ── Auto-download models on first run ──────────────────────
+@st.cache_resource
+def _ensure_models():
+    from download_models import ensure_assets
+    return ensure_assets()
+
+with st.spinner("Checking model files..."):
+    _ensure_models()
 
 
 # ── Cached data loading ────────────────────────────────────
@@ -198,6 +209,54 @@ def load_densenet_embedding_model():
     return embedding_model, device
 
 
+@st.cache_resource
+def load_gradcam_model():
+    import torch
+    import torch.nn as nn
+    from torchvision import models
+    from src.gradcam import GradCAM
+
+    if not os.path.exists(DENSENET_MODEL_PATH):
+        return None, None, None
+
+    device = torch.device("cuda" if torch.cuda.is_available()
+                          else "mps" if torch.backends.mps.is_available()
+                          else "cpu")
+    model = models.densenet121(weights=None)
+    model.classifier = nn.Sequential(nn.Dropout(0.3), nn.Linear(1024, 9))
+    model.load_state_dict(torch.load(DENSENET_MODEL_PATH, map_location=device,
+                                     weights_only=True))
+    model = model.to(device)
+    model.eval()
+    gradcam = GradCAM(model, model.features.denseblock4)
+    return gradcam, model, device
+
+
+def get_gradcam_heatmap(image):
+    """Generate Grad-CAM heatmap for a single image."""
+    import torch
+    from torchvision import transforms
+
+    gradcam, model, device = load_gradcam_model()
+    if gradcam is None:
+        return None, None
+
+    transform = transforms.Compose([
+        transforms.Resize((64, 64)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225]),
+    ])
+
+    pil_img = Image.fromarray(image)
+    if pil_img.mode != "RGB":
+        pil_img = pil_img.convert("RGB")
+    img_tensor = transform(pil_img).unsqueeze(0).to(device)
+
+    cam, pred_class, probs = gradcam.generate(img_tensor)
+    return cam, probs
+
+
 def predict_single_svm(image):
     from src.baseline_ml import extract_hog_features
     svm, scaler = load_svm_model()
@@ -281,13 +340,15 @@ with st.sidebar:
     page = st.radio(
         "Navigate",
         ["Overview", "Data Exploration", "Model Comparison",
-         "OOD Detection", "Live Classification", "Technical Details"],
+         "OOD Detection", "Diagnostic Analysis",
+         "Live Classification", "Technical Details"],
         index=0,
     )
 
     st.divider()
     st.markdown("**Phase 1** — EDA + SVM + DenseNet121")
     st.markdown("**Phase 2** — Hybrid GMM + OOD Detection")
+    st.markdown("**Phase 3** — Ablation + Grad-CAM + Calibration")
     st.divider()
     st.caption("PathMNIST | 9 classes | 107K images")
 
@@ -362,11 +423,13 @@ if page == "Overview":
 
     with col_r:
         st.markdown("### Architecture")
-        arch_path = os.path.join("results", "architecture_diagram.png")
+        arch_path = os.path.join(PHASE3_RESULTS, "architecture_diagram.png")
+        if not os.path.exists(arch_path):
+            arch_path = os.path.join("results", "architecture_diagram.png")
         if os.path.exists(arch_path):
             st.image(arch_path, use_container_width=True)
         else:
-            st.info("Architecture diagram not yet generated. Run `python src/visualize.py`")
+            st.info("Run `python run.py --phase 3` to generate the architecture diagram.")
 
     st.markdown("### Dataset: PathMNIST")
     st.markdown(f"""
@@ -491,7 +554,7 @@ elif page == "Model Comparison":
                   (**{improvement:.0f}% relative improvement**)
                 - The gap confirms handcrafted features (HOG) cannot capture
                   fine-grained pathology textures
-                - Class-weighted loss helps ResNet handle the imbalance
+                - Class-weighted loss helps DenseNet121 handle the imbalance
                 """)
             if accs[2] > 0:
                 hybrid_data = results.get("hybrid", {})
@@ -772,7 +835,7 @@ elif page == "Live Classification":
             st.info("GMM model not loaded.")
 
     with col_img:
-        col_svm, col_resnet = st.columns(2)
+        col_svm, col_resnet, col_gradcam = st.columns(3)
 
         with col_svm:
             st.markdown("### SVM Prediction")
@@ -832,6 +895,147 @@ elif page == "Live Classification":
             else:
                 st.warning("DenseNet model not loaded. Run dl_model.py first.")
 
+        with col_gradcam:
+            st.markdown("### Grad-CAM")
+            cam, cam_probs = get_gradcam_heatmap(image)
+            if cam is not None:
+                img_resized = np.array(Image.fromarray(image).resize((64, 64)))
+                img_float = img_resized.astype(float) / 255.0
+
+                import matplotlib.cm as mpl_cm
+                heatmap = mpl_cm.jet(cam)[:, :, :3]
+                overlay = 0.5 * img_float + 0.5 * heatmap
+                overlay = np.clip(overlay, 0, 1)
+
+                fig_cam, ax_cam = plt.subplots(figsize=(4, 4))
+                ax_cam.imshow(overlay)
+                ax_cam.axis("off")
+                pred_cls = int(cam_probs.argmax())
+                ax_cam.set_title(f"Attention: {CLASS_NAMES[pred_cls]}\n"
+                                 f"(conf: {cam_probs[pred_cls]:.1%})", fontsize=10)
+                plt.tight_layout()
+                st.pyplot(fig_cam)
+                plt.close()
+
+                st.caption("Warm regions = high model attention. "
+                           "Verifies the model uses clinically relevant tissue features.")
+            else:
+                st.info("Grad-CAM not available. Ensure DenseNet121 model exists.")
+
+
+# ═══════════════════════════════════════════════════════════
+# PAGE: Diagnostic Analysis
+# ═══════════════════════════════════════════════════════════
+elif page == "Diagnostic Analysis":
+    st.markdown('<p class="main-header">Diagnostic Analysis</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Phase 3 — Ablation study, calibration, and model interpretability</p>',
+                unsafe_allow_html=True)
+
+    # Calibration metrics cards
+    cal_path = os.path.join(PHASE3_DIAGNOSTIC, "calibration_metrics.json")
+    if os.path.exists(cal_path):
+        with open(cal_path) as f:
+            cal = json.load(f)
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.markdown(f"""<div class="metric-card metric-blue">
+                <h2>{cal['ece']:.4f}</h2><p>Expected Calibration Error</p></div>""",
+                unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"""<div class="metric-card metric-green">
+                <h2>{cal['mean_confidence_correct']:.1%}</h2><p>Avg Conf (Correct)</p></div>""",
+                unsafe_allow_html=True)
+        with col3:
+            st.markdown(f"""<div class="metric-card metric-orange">
+                <h2>{cal['mean_confidence_incorrect']:.1%}</h2><p>Avg Conf (Incorrect)</p></div>""",
+                unsafe_allow_html=True)
+        with col4:
+            st.markdown(f"""<div class="metric-card metric-purple">
+                <h2>{cal['accuracy']:.1%}</h2><p>Overall Accuracy</p></div>""",
+                unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "Per-Class Performance", "Confusion Matrix",
+        "Confidence Calibration", "Ablation Summary", "Grad-CAM"
+    ])
+
+    with tab1:
+        img_path = os.path.join(PHASE3_DIAGNOSTIC, "per_class_performance.png")
+        if os.path.exists(img_path):
+            st.image(img_path, use_container_width=True)
+            pc_path = os.path.join(PHASE3_DIAGNOSTIC, "per_class_metrics.json")
+            if os.path.exists(pc_path):
+                with open(pc_path) as f:
+                    pc = json.load(f)
+                rows = [{"Class": name, "Accuracy": f"{m['accuracy']:.4f}",
+                         "F1 Score": f"{m['f1']:.4f}"}
+                        for name, m in pc.items()]
+                st.dataframe(rows, use_container_width=True, hide_index=True)
+        else:
+            st.info("Run `python run.py --phase 3` to generate diagnostic results.")
+
+    with tab2:
+        img_path = os.path.join(PHASE3_DIAGNOSTIC, "confusion_matrix.png")
+        if os.path.exists(img_path):
+            st.image(img_path, use_container_width=True)
+            st.caption("Left: raw counts. Right: normalized by true class (row-wise). "
+                       "Diagonal = correct predictions.")
+        else:
+            st.info("Run `python run.py --phase 3` to generate the confusion matrix.")
+
+    with tab3:
+        img_path = os.path.join(PHASE3_DIAGNOSTIC, "confidence_calibration.png")
+        if os.path.exists(img_path):
+            st.image(img_path, use_container_width=True)
+            st.markdown("""
+            **Reliability Diagram** (left): Bars should follow the diagonal for
+            a perfectly calibrated model. Bars above the line = underconfident,
+            below = overconfident.
+
+            **Confidence Distribution** (right): A well-calibrated model shows high
+            confidence for correct predictions and lower confidence for incorrect ones.
+            """)
+        else:
+            st.info("Run `python run.py --phase 3` to generate calibration analysis.")
+
+    with tab4:
+        img_path = os.path.join(PHASE3_DIAGNOSTIC, "ablation_summary.png")
+        if os.path.exists(img_path):
+            st.image(img_path, use_container_width=True)
+        st.markdown("""
+        #### Augmentation Techniques Used
+
+        | Technique | Purpose |
+        |-----------|---------|
+        | **Mixup** (alpha=0.2) | Regularization via convex combinations of training pairs |
+        | **Label Smoothing** (0.1) | Prevents hard-label overfitting, improves calibration |
+        | **Stain Augmentation** | ColorJitter + RandomErasing simulates H&E staining variation |
+        | **Test-Time Augmentation** | Averages predictions over 10 augmented views |
+        """)
+
+    with tab5:
+        img_path = os.path.join(PHASE3_GRADCAM, "gradcam_grid.png")
+        if os.path.exists(img_path):
+            st.image(img_path, use_container_width=True,
+                     caption="Grad-CAM heatmaps: warm regions indicate where DenseNet121 "
+                             "focuses for each tissue class")
+            st.markdown("""
+            **Why this matters in medical imaging:**
+            Grad-CAM verifies that the model attends to clinically relevant tissue
+            structures rather than background artifacts. This builds trust in the model's
+            predictions and supports clinical adoption.
+            """)
+        else:
+            st.info("Run `python run.py --phase 3` to generate Grad-CAM visualizations.")
+
+        arch_path = os.path.join(PHASE3_RESULTS, "architecture_diagram.png")
+        if os.path.exists(arch_path):
+            st.markdown("---")
+            st.markdown("#### Pipeline Architecture")
+            st.image(arch_path, use_container_width=True)
+
 
 # ═══════════════════════════════════════════════════════════
 # PAGE: Technical Details
@@ -879,7 +1083,13 @@ elif page == "Technical Details":
         - Optimizer: Adam (lr=1e-4, weight_decay=1e-5)
         - Scheduler: ReduceLROnPlateau (factor=0.5, patience=2)
         - Early stopping: patience=5 epochs
-        - Augmentation: random flip, rotation(15°), color jitter
+        - Augmentation: random flip, rotation(15°), color jitter, random erasing
+
+        **Advanced Techniques:**
+        - **Mixup** (alpha=0.2): blends image pairs with soft labels for regularization
+        - **Label Smoothing** (0.1): softens target distribution to improve calibration
+        - **Stain Augmentation**: aggressive ColorJitter simulating H&E variation across labs
+        - **Test-Time Augmentation**: averages 10 augmented + 1 clean prediction at inference
 
         **Class-weighted Cross-Entropy Loss:**
         """)
@@ -890,7 +1100,7 @@ elif page == "Technical Details":
         ### Hybrid GMM — Uncertainty-Aware OOD Detection
 
         **Pipeline:**
-        1. Load fine-tuned DenseNet121 and extract 512-dim penultimate layer embeddings
+        1. Load fine-tuned DenseNet121 and extract 1024-dim penultimate layer embeddings
         2. Fit a 9-component full-covariance GMM on training embeddings
         3. Score test samples via log-likelihood
         4. OOD threshold = 5th percentile of training log-likelihoods
@@ -917,23 +1127,27 @@ elif page == "Technical Details":
         st.markdown("### Project Structure")
         st.code("""
 MedGuard/
-├── run.py              # Phased CLI entry point
-├── app.py              # Streamlit dashboard (this!)
-├── config.py           # Centralized configuration
+├── run.py                  # Phased CLI entry point
+├── app.py                  # Streamlit dashboard (this!)
+├── config.py               # Centralized configuration
+├── setup.sh                # One-command project setup
 ├── requirements.txt
 ├── src/
-│   ├── data_loader.py      # PathMNIST loading + class weights
-│   ├── data_exploration.py  # EDA plots
-│   ├── baseline_ml.py       # HOG + SVM (Phase 1)
-│   ├── dl_model.py          # DenseNet121 fine-tuning (Phase 1)
-│   ├── hybrid_gmm.py        # GMM + OOD detection (Phase 2)
-│   ├── evaluate.py          # Unified evaluation
-│   ├── visualize.py         # Visualization utils
-│   └── ablation_study.py    # Model comparison / ablation
-├── models/             # Saved weights (SVM, DenseNet121, GMM)
+│   ├── data_loader.py          # PathMNIST loading + class weights
+│   ├── data_exploration.py     # EDA plots
+│   ├── baseline_ml.py          # HOG + SVM (Phase 1)
+│   ├── dl_model.py             # DenseNet121 fine-tuning (Phase 1)
+│   ├── hybrid_gmm.py           # GMM + OOD detection (Phase 2)
+│   ├── evaluate.py             # Unified evaluation
+│   ├── visualize.py            # Architecture diagrams
+│   ├── ablation_study.py       # Model comparison
+│   ├── diagnostic_ablation.py  # Per-class + calibration analysis (Phase 3)
+│   └── gradcam.py              # Grad-CAM visualizations (Phase 3)
+├── models/                 # Saved weights (SVM, DenseNet121, GMM)
 ├── results/
-│   ├── phase1/         # EDA, baseline, DL results
-│   └── phase2/         # Hybrid GMM, t-SNE, ablation
+│   ├── phase1/             # EDA, baseline, DL results
+│   ├── phase2/             # Hybrid GMM, t-SNE, ablation
+│   └── phase3/             # Diagnostics, Grad-CAM, architecture
 └── report/
-    └── main.tex        # LaTeX paper
+    └── main.tex            # LaTeX paper
         """, language="text")

@@ -1,8 +1,10 @@
 {
-  "model": "ResNet18 (fine-tuned)",
-  "accuracy": 0.936908077994429,
-  "macro_f1": 0.9185528367919922,
-  "test_loss": 0.2699208284118589,
-  "best_epoch": 25,
+  "model": "DenseNet121 (fine-tuned)",
+  "accuracy": 0.9467966573816156,
+  "macro_f1": 0.9259930485547009,
+  "accuracy_no_tta": 0.9468,
+  "macro_f1_no_tta": 0.926,
+  "test_loss": 0.6054,
+  "best_epoch": 28,
   "total_epochs": 30
 }

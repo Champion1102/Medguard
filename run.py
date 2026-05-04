@@ -16,6 +16,7 @@ import time
 from config import (
     PHASE1_EDA, PHASE1_BASELINE, PHASE1_DL,
     PHASE2_TSNE, PHASE2_ABLATION, PHASE2_RESULTS,
+    PHASE3_RESULTS, PHASE3_GRADCAM, PHASE3_DIAGNOSTIC,
     SVM_MODEL_PATH, DENSENET_MODEL_PATH, GMM_MODEL_PATH,
     RESULTS_DIR,
 )
@@ -252,6 +253,75 @@ def print_phase2_summary():
     print()
 
 
+def run_phase3(demo=False, force=False):
+    """Phase 3: Diagnostic Analysis + Grad-CAM + Architecture Diagram."""
+    if not os.path.exists(DENSENET_MODEL_PATH):
+        print("\n  ERROR: DenseNet121 model not found. Run Phase 1 first.")
+        return False
+
+    print("\n" + "=" * 60)
+    print("  PHASE 3: DIAGNOSTIC ANALYSIS & VISUALIZATION")
+    print("=" * 60)
+
+    ensure_dirs(PHASE3_RESULTS, PHASE3_GRADCAM, PHASE3_DIAGNOSTIC)
+
+    # --- Step 1: Architecture diagram ---
+    if not force and os.path.exists(os.path.join(PHASE3_RESULTS, "architecture_diagram.png")):
+        print("\n[1/3] [CACHED] Architecture diagram found, skipping...")
+    else:
+        print("\n[1/3] Generating architecture diagram...")
+        from src.visualize import plot_architecture_diagram
+        plot_architecture_diagram(output_dir=PHASE3_RESULTS)
+
+    # --- Step 2: Diagnostic ablation ---
+    if not force and phase_has_results(PHASE3_DIAGNOSTIC):
+        print("\n[2/3] [CACHED] Diagnostic ablation results found, skipping...")
+    else:
+        print("\n[2/3] Running diagnostic ablation analysis...")
+        from src.diagnostic_ablation import run_diagnostic_ablation
+        run_diagnostic_ablation(output_dir=PHASE3_DIAGNOSTIC)
+
+    # --- Step 3: Grad-CAM ---
+    if not force and phase_has_results(PHASE3_GRADCAM):
+        print("\n[3/3] [CACHED] Grad-CAM results found, skipping...")
+    else:
+        print("\n[3/3] Generating Grad-CAM visualizations...")
+        from src.gradcam import run_gradcam
+        run_gradcam(output_dir=PHASE3_GRADCAM)
+
+    # --- Summary ---
+    print_phase3_summary()
+    return True
+
+
+def print_phase3_summary():
+    """Print Phase 3 results summary."""
+    import json
+
+    print("\n" + "=" * 60)
+    print("  PHASE 3 RESULTS SUMMARY")
+    print("=" * 60)
+
+    cal_path = os.path.join(PHASE3_DIAGNOSTIC, "calibration_metrics.json")
+    if os.path.exists(cal_path):
+        with open(cal_path) as f:
+            cal = json.load(f)
+        print(f"\n  Calibration:")
+        print(f"    ECE: {cal['ece']:.4f}")
+        print(f"    Mean confidence (correct):   {cal['mean_confidence_correct']:.4f}")
+        print(f"    Mean confidence (incorrect): {cal['mean_confidence_incorrect']:.4f}")
+
+    print("\n  Generated files:")
+    for phase_dir in [PHASE3_RESULTS, PHASE3_DIAGNOSTIC, PHASE3_GRADCAM]:
+        if os.path.exists(phase_dir):
+            for f in sorted(os.listdir(phase_dir)):
+                if not f.startswith("."):
+                    full = os.path.join(phase_dir, f)
+                    if os.path.isfile(full):
+                        print(f"    {full}")
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="MedGuard: Uncertainty-Aware Medical Image Classification",
@@ -262,6 +332,7 @@ Examples:
   python run.py --phase 1 --demo       # Phase 1 demo (no training)
   python run.py --phase 1 --force      # Force rerun everything
   python run.py --phase 2              # Phase 1 + Phase 2
+  python run.py --phase 3              # Diagnostic analysis + Grad-CAM
         """
     )
     parser.add_argument("--phase", type=int, choices=[1, 2, 3], required=True,
@@ -290,7 +361,7 @@ Examples:
     elif args.phase == 2:
         run_phase2(demo=args.demo, force=args.force)
     elif args.phase == 3:
-        print("\n  Phase 3 not yet implemented.")
+        run_phase3(demo=args.demo, force=args.force)
 
     elapsed = time.time() - start
     print(f"  Total time: {elapsed:.1f}s")

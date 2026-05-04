@@ -17,6 +17,7 @@ where pi_k are mixture weights, N is the multivariate Gaussian density.
 import os
 import sys
 import json
+import time
 import numpy as np
 import torch
 import torch.nn as nn
@@ -27,6 +28,7 @@ from sklearn.metrics import accuracy_score, f1_score
 import matplotlib.pyplot as plt
 import seaborn as sns
 import joblib
+from tqdm import tqdm
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.data_loader import load_pathmnist, CLASS_NAMES
@@ -81,9 +83,9 @@ def extract_embeddings(model, loader):
     all_embeddings = []
     all_labels = []
 
-    for images, labels in loader:
+    for images, labels in tqdm(loader, desc="  Batches", leave=False):
         images = images.to(DEVICE)
-        embeddings = model(images).squeeze(-1).squeeze(-1)  # (B, 512)
+        embeddings = model(images).squeeze(-1).squeeze(-1)  # (B, 1024)
         all_embeddings.append(embeddings.cpu().numpy())
         all_labels.extend(labels.squeeze().numpy())
 
@@ -92,11 +94,17 @@ def extract_embeddings(model, loader):
 
 def fit_gmm(train_embeddings, n_components=9):
     """Fit Gaussian Mixture Model on training embeddings."""
-    print(f"Fitting GMM with {n_components} components on {len(train_embeddings)} samples...")
+    print(f"  Fitting GMM with {n_components} full-covariance components on "
+          f"{len(train_embeddings)} x {train_embeddings.shape[1]}-dim embeddings...")
+    print(f"  Running 3 random initializations, max 200 EM iterations each...")
+    print(f"  (This is CPU-bound and may take 10-20 minutes)")
+    t0 = time.time()
     gmm = GaussianMixture(n_components=n_components, covariance_type="full",
-                          random_state=42, max_iter=200, n_init=3)
+                          random_state=42, max_iter=200, n_init=3, verbose=1)
     gmm.fit(train_embeddings)
-    print(f"GMM converged: {gmm.converged_}")
+    elapsed = time.time() - t0
+    print(f"  GMM converged: {gmm.converged_} | Iterations: {gmm.n_iter_} | "
+          f"Time: {elapsed:.1f}s ({elapsed/60:.1f} min)")
     return gmm
 
 
@@ -128,7 +136,6 @@ def plot_tsne_ood(embeddings, labels, is_ood, output_dir=None,
     """Generate t-SNE plot with OOD points highlighted."""
     output_dir = output_dir or RESULTS_DIR
     os.makedirs(output_dir, exist_ok=True)
-    print("Computing t-SNE (this may take a minute)...")
     n = len(embeddings)
     if n > 5000:
         idx = np.random.RandomState(42).choice(n, 5000, replace=False)
@@ -136,8 +143,11 @@ def plot_tsne_ood(embeddings, labels, is_ood, output_dir=None,
         labels = labels[idx]
         is_ood = is_ood[idx]
 
-    tsne = TSNE(n_components=2, random_state=42, perplexity=30, max_iter=1000)
+    print(f"  Computing t-SNE on {len(embeddings)} samples...")
+    t0 = time.time()
+    tsne = TSNE(n_components=2, random_state=42, perplexity=30, max_iter=1000, verbose=1)
     coords = tsne.fit_transform(embeddings)
+    print(f"  t-SNE done in {time.time() - t0:.1f}s")
 
     fig, ax = plt.subplots(figsize=(12, 10))
 
@@ -167,28 +177,42 @@ def run_hybrid_gmm(output_dir=None, tsne_dir=None):
     output_dir = output_dir or RESULTS_DIR
     tsne_dir = tsne_dir or output_dir
     os.makedirs(output_dir, exist_ok=True)
+    pipeline_start = time.time()
 
     train_loader, val_loader, test_loader, _ = load_pathmnist(
         mode="dl", batch_size=128)
 
+    # Step 1: Load model
+    print("\n[Step 1/6] Loading DenseNet121 backbone...")
     embedding_model, full_model = load_densenet_backbone()
-    print("Extracting training embeddings...")
+
+    # Step 2: Extract training embeddings
+    print("\n[Step 2/6] Extracting training embeddings...")
+    t0 = time.time()
     train_emb, train_labels = extract_embeddings(embedding_model, train_loader)
-    print(f"Training embeddings shape: {train_emb.shape}")
+    print(f"  Shape: {train_emb.shape} | Time: {time.time() - t0:.1f}s")
 
-    print("Extracting test embeddings...")
+    # Step 3: Extract test embeddings
+    print("\n[Step 3/6] Extracting test embeddings...")
+    t0 = time.time()
     test_emb, test_labels = extract_embeddings(embedding_model, test_loader)
-    print(f"Test embeddings shape: {test_emb.shape}")
+    print(f"  Shape: {test_emb.shape} | Time: {time.time() - t0:.1f}s")
 
+    # Step 4: Fit GMM
+    print("\n[Step 4/6] Fitting Gaussian Mixture Model...")
     gmm = fit_gmm(train_emb, n_components=9)
     joblib.dump(gmm, os.path.join(MODELS_DIR, "hybrid_gmm.pkl"))
+    print(f"  Saved GMM to {MODELS_DIR}/hybrid_gmm.pkl")
 
+    # Step 5: OOD detection + classification
+    print("\n[Step 5/6] Running OOD detection & classification...")
+    t0 = time.time()
     gmm_preds = gmm.predict(test_emb)
-
     test_scores, is_ood, threshold = detect_ood(gmm, train_emb, test_emb)
 
     full_model = full_model.to(DEVICE)
     full_model.eval()
+    print("  Getting DenseNet121 predictions...")
     _, _, dl_preds, _ = _get_dl_predictions(full_model, test_loader)
 
     hybrid_preds = dl_preds.copy()
@@ -196,11 +220,12 @@ def run_hybrid_gmm(output_dir=None, tsne_dir=None):
     in_dist_f1 = f1_score(test_labels[~is_ood], hybrid_preds[~is_ood], average="macro")
     overall_acc = accuracy_score(test_labels, hybrid_preds)
     overall_f1 = f1_score(test_labels, hybrid_preds, average="macro")
+    print(f"  Time: {time.time() - t0:.1f}s")
 
-    print(f"\nHybrid GMM Results:")
-    print(f"  Overall - Acc: {overall_acc:.4f}, F1: {overall_f1:.4f}")
-    print(f"  In-dist - Acc: {in_dist_acc:.4f}, F1: {in_dist_f1:.4f}")
-    print(f"  OOD detection rate: {is_ood.mean():.4f}")
+    print(f"\n  Hybrid GMM Results:")
+    print(f"    Overall  - Acc: {overall_acc:.4f}, F1: {overall_f1:.4f}")
+    print(f"    In-dist  - Acc: {in_dist_acc:.4f}, F1: {in_dist_f1:.4f}")
+    print(f"    OOD rate - {is_ood.sum()}/{len(is_ood)} ({is_ood.mean():.1%})")
 
     results = {
         "model": "Hybrid GMM (DenseNet121 embeddings)",
@@ -216,7 +241,12 @@ def run_hybrid_gmm(output_dir=None, tsne_dir=None):
     with open(os.path.join(output_dir, "hybrid_results.json"), "w") as f:
         json.dump(results, f, indent=2)
 
+    # Step 6: t-SNE visualization
+    print("\n[Step 6/6] Generating t-SNE visualization...")
     plot_tsne_ood(test_emb, test_labels, is_ood, output_dir=tsne_dir)
+
+    total = time.time() - pipeline_start
+    print(f"\n  Phase 2 pipeline complete! Total time: {total:.1f}s ({total/60:.1f} min)")
 
     return results
 
@@ -226,7 +256,7 @@ def _get_dl_predictions(model, loader):
     """Get predictions from the full DL model."""
     model.eval()
     all_preds, all_labels = [], []
-    for images, labels in loader:
+    for images, labels in tqdm(loader, desc="  Predicting", leave=False):
         images = images.to(DEVICE)
         outputs = model(images)
         preds = outputs.argmax(dim=1).cpu().numpy()

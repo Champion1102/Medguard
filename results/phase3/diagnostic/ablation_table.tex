@@ -1,0 +1,15 @@
+\begin{table}[h]
+\centering
+\caption{Diagnostic Ablation: Component Contributions}
+\label{tab:diagnostic_ablation}
+\begin{tabular}{lcc}
+\toprule
+Configuration & Accuracy & Macro F1 \\
+\midrule
+HOG + SVM (Baseline) & 0.4815 & 0.4246 \\
+DenseNet121 (no TTA) & 0.9468 & 0.9260 \\
+DenseNet121 (with TTA) & 0.9468 & 0.9260 \\
+Hybrid GMM (in-dist only) & 0.9834 & 0.9626 \\
+\bottomrule
+\end{tabular}
+\end{table}

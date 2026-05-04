@@ -37,10 +37,13 @@ def get_transforms(mode="dl"):
             transforms.RandomHorizontalFlip(),
             transforms.RandomVerticalFlip(),
             transforms.RandomRotation(15),
-            transforms.ColorJitter(brightness=0.2, contrast=0.2),
+            # Stain augmentation: simulates H&E staining variation across labs
+            transforms.ColorJitter(brightness=0.3, contrast=0.3,
+                                   saturation=0.25, hue=0.04),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225]),
+            transforms.RandomErasing(p=0.15, scale=(0.02, 0.15)),
         ])
         test_transform = transforms.Compose([
             transforms.Resize((64, 64)),
